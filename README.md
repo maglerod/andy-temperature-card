@@ -23,3 +23,4 @@ Key features:
 Notes:
 The stats feature uses the REST history endpoint via hass.callApi("GET", "history/period/...").
 Runs fully in the browser (no backend).
+
