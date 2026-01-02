@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v1.0.3
+ * v1.0.4
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -15,7 +15,7 @@
  *
  * Install: Se README.md in GITHUB
  *
- * Changelog 1.0.3 - 2026-01-02
+ * Changelog 1.0.4 - 2026-01-02
  * - Improved scale rendering (outside the outline)
  * - Fixed the Interval Edit / Delete issues
  * - Added the posibility to change scale color, can be done in each interval in 2 modes: per interval (coloring the specific interval only) or active interval (same color for the whole scale)
@@ -24,7 +24,7 @@
  *
  */
 
-console.info("Andy Temperature Card loaded: v1.0.3");
+console.info("Andy Temperature Card loaded: v1.0.4");
 
 const LitElement =
   window.LitElement || Object.getPrototypeOf(customElements.get("ha-panel-lovelace"));
@@ -142,7 +142,7 @@ class AndyTemperatureCard extends LitElement {
     this._statsBusy = false;
   }
 
-  static getConfigElement() { return document.createElement("andy-temperature-card-development-editor"); }
+  static getConfigElement() { return document.createElement("andy-temperature-card-editor"); }
 
   _getStateValue(entityId) {
     if (!entityId) return null;
@@ -210,7 +210,7 @@ class AndyTemperatureCard extends LitElement {
       }
       this._lastStatsAt = now;
     } catch (e) {
-      console.warn("Andy Temperature Card v1.0.3:  history fetch failed (REST)", e);
+      console.warn("Andy Temperature Card v1.0.4:  history fetch failed (REST)", e);
       this._stats = { min: null, avg: null, max: null, samples: 0, error: true };
       this._lastStatsAt = now;
     } finally {
@@ -328,7 +328,7 @@ class AndyTemperatureCard extends LitElement {
         }
       }
     } catch (e) {
-      console.warn("Andy Temperature Card v1.0.3: scale DOM draw failed", e);
+      console.warn("Andy Temperature Card v1.0.4: scale DOM draw failed", e);
     }
   }
 
@@ -583,14 +583,14 @@ class AndyTemperatureCard extends LitElement {
   }
 }
 
-if (!customElements.get("andy-temperature-card-development")) {
-  customElements.define("andy-temperature-card-development", AndyTemperatureCard);
+if (!customElements.get("andy-temperature-card")) {
+  customElements.define("andy-temperature-card", AndyTemperatureCard);
 }
 
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: "andy-temperature-card-development",
-  name: "Andy Temperature Card (Dev)",
+  type: "andy-temperature-card",
+  name: "Andy Temperature Card",
   description: "Thermometer with locked scale + intervals (fill/gradient/outline) + per-interval scale coloring + glass + orientation + min/avg/max (REST history).",
 });
 
@@ -598,7 +598,7 @@ window.customCards.push({
  * Editor (HTMLElement)
  * ============================================================================= */
 
-const EDITOR_TAG = "andy-temperature-card-development-editor";
+const EDITOR_TAG = "andy-temperature-card-editor";
 
 const DEFAULTS = {
   name: "Temperature",
@@ -802,7 +802,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._elStatsHours = mkText("Stats lookback hours", "stats_hours", "number", "24");
     root.appendChild(this._elStatsHours);
 
-    // Intervals UI remains the same as v1.0.3 (id-based edit/delete + scale_color field)
+    // Intervals UI remains the same as v1.0.4 (id-based edit/delete + scale_color field)
     // (Kept unchanged intentionally)
 
     // ---- intervals section (unchanged) ----
@@ -884,7 +884,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this.addEventListener("keydown", stopBubble);
   }
 
-  // ---- The rest of the editor code (interval list + draft UI + commit/onChange) is identical to v1.0.3 ----
+  // ---- The rest of the editor code (interval list + draft UI + commit/onChange) is identical to v1.0.4 ----
   // To keep this file complete and consistent, we include it verbatim below.
 
   _sync() {
