@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v1.01 
+ * v1.0.2 
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde")
  *
