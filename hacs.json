@@ -1,8 +1,5 @@
 {
   "name": "Andy Temperature Card",
   "content_in_root": false,
-  "render_readme": true,
-  "homeassistant": "2023.0.0",
-  "zip_release": true,
   "filename": "andy-temperature-card.js"
 }
