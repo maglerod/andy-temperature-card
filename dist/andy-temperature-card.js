@@ -1,15 +1,30 @@
 /**
  * Andy Temperature Card
- * v1.0.2 
+ * v1.0.3
  * ------------------------------------------------------------------
- * Developed by: Andreas ("AndyBonde")
+ * Developed by: Andreas ("AndyBonde") with some help from AI :).
+ *
+ * License / Disclaimer:
+ * - Free to use, copy, modify, redistribute.
+ * - Provided "AS IS" without warranty. No liability.
+ * - Not affiliated with Home Assistant / Nabu Casa.
+ * - Runs fully in the browser.
  *
  * Compatibility notes:
  * - Stats uses REST history endpoint via hass.callApi("GET", "history/period/...")
  *
+ * Install: Se README.md in GITHUB
+ *
+ * Changelog 1.0.3 - 2026-01-02
+ * - Improved scale rendering (outside the outline)
+ * - Fixed the Interval Edit / Delete issues
+ * - Added the posibility to change scale color, can be done in each interval in 2 modes: per interval (coloring the specific interval only) or active interval (same color for the whole scale)
+ * - Added support for horizontal / vertical mode
+ *
+ *
  */
 
-console.info("Andy Temperature Card loaded: v1.01");
+console.info("Andy Temperature Card loaded: v1.0.3");
 
 const LitElement =
   window.LitElement || Object.getPrototypeOf(customElements.get("ha-panel-lovelace"));
@@ -17,11 +32,11 @@ const html = window.html || LitElement.prototype.html;
 const css = window.css || LitElement.prototype.css;
 
 const DEFAULT_INTERVALS = [
-  { to: 0,  color: "#2b6cff", outline: "#ffffff", gradient: { enabled: false, from: "#2b6cff", to: "#2b6cff" } },
-  { to: 10, color: "#39c0ff", outline: "#ffffff", gradient: { enabled: false, from: "#39c0ff", to: "#39c0ff" } },
-  { to: 20, color: "#22c55e", outline: "#ffffff", gradient: { enabled: false, from: "#22c55e", to: "#22c55e" } },
-  { to: 30, color: "#f59e0b", outline: "#ffffff", gradient: { enabled: false, from: "#f59e0b", to: "#f59e0b" } },
-  { to: 100,color: "#ef4444", outline: "#ffffff", gradient: { enabled: false, from: "#ef4444", to: "#ef4444" } },
+  { id: "it0", to: 0,   color: "#2b6cff", outline: "#ffffff", scale_color: "#2b6cff", gradient: { enabled: false, from: "#2b6cff", to: "#2b6cff" } },
+  { id: "it1", to: 10,  color: "#39c0ff", outline: "#ffffff", scale_color: "#39c0ff", gradient: { enabled: false, from: "#39c0ff", to: "#39c0ff" } },
+  { id: "it2", to: 20,  color: "#22c55e", outline: "#ffffff", scale_color: "#22c55e", gradient: { enabled: false, from: "#22c55e", to: "#22c55e" } },
+  { id: "it3", to: 30,  color: "#f59e0b", outline: "#ffffff", scale_color: "#f59e0b", gradient: { enabled: false, from: "#f59e0b", to: "#f59e0b" } },
+  { id: "it4", to: 100, color: "#ef4444", outline: "#ffffff", scale_color: "#ef4444", gradient: { enabled: false, from: "#ef4444", to: "#ef4444" } },
 ];
 
 function deepClone(x) { return JSON.parse(JSON.stringify(x ?? {})); }
@@ -32,13 +47,20 @@ function normalizeHex(s, fallback = "#22c55e") {
   const t = String(s).trim();
   return isHexColor(t) ? t : fallback;
 }
+function uid(prefix = "it") {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+}
 function normalizeInterval(it) {
   const out = { ...(it || {}) };
+  if (!out.id) out.id = uid("it");
+
   out.to = Number(out.to);
   if (!Number.isFinite(out.to)) out.to = 0;
 
   out.color = normalizeHex(out.color, "#22c55e");
   out.outline = normalizeHex(out.outline, "#ffffff");
+
+  out.scale_color = normalizeHex(out.scale_color, out.color);
 
   const g0 = out.gradient || {};
   out.gradient = { ...(g0 || {}) };
@@ -84,14 +106,18 @@ class AndyTemperatureCard extends LitElement {
 
       glass: true,
 
+      orientation: "vertical",
+
       show_scale: false,
+
+      scale_color_mode: "per_interval",
+
       show_stats: false,
       stats_hours: 24,
 
       intervals: deepClone(DEFAULT_INTERVALS),
     };
 
-    // Accept older configs that may still include liquid_animation; ignore it safely.
     const cfg = { ...(config || {}) };
     if ("liquid_animation" in cfg) delete cfg.liquid_animation;
 
@@ -99,6 +125,12 @@ class AndyTemperatureCard extends LitElement {
 
     if (!Number.isFinite(Number(this._config.min))) this._config.min = -20;
     if (!Number.isFinite(Number(this._config.max))) this._config.max = 40;
+
+    const ori = String(this._config.orientation || "vertical");
+    this._config.orientation = (ori === "horizontal") ? "horizontal" : "vertical";
+
+    const scm = String(this._config.scale_color_mode || "per_interval");
+    this._config.scale_color_mode = (scm === "active_interval") ? "active_interval" : "per_interval";
 
     if (!Array.isArray(this._config.intervals) || this._config.intervals.length === 0) {
       this._config.intervals = deepClone(DEFAULT_INTERVALS);
@@ -110,7 +142,7 @@ class AndyTemperatureCard extends LitElement {
     this._statsBusy = false;
   }
 
-  static getConfigElement() { return document.createElement("andy-temperature-card-editor"); }
+  static getConfigElement() { return document.createElement("andy-temperature-card-development-editor"); }
 
   _getStateValue(entityId) {
     if (!entityId) return null;
@@ -178,7 +210,7 @@ class AndyTemperatureCard extends LitElement {
       }
       this._lastStatsAt = now;
     } catch (e) {
-      console.warn("Andy Temperature Card v16.36: history fetch failed (REST)", e);
+      console.warn("Andy Temperature Card v1.0.3:  history fetch failed (REST)", e);
       this._stats = { min: null, avg: null, max: null, samples: 0, error: true };
       this._lastStatsAt = now;
     } finally {
@@ -195,7 +227,7 @@ class AndyTemperatureCard extends LitElement {
     }
   }
 
-  // --- LOCKED SCALE BASELINE (DO NOT TOUCH) ---
+  // --- SCALE: LEFT of outline, auto-placed outside widest point (bbox + stroke) ---
   _drawScaleDom() {
     try {
       const showScale = !!this._config?.show_scale;
@@ -210,6 +242,23 @@ class AndyTemperatureCard extends LitElement {
 
       while (layer.firstChild) layer.removeChild(layer.firstChild);
       if (!showScale) return;
+
+      // detect outline left edge: outer path bbox + stroke width
+      const outerPath = svgEl.querySelector("path.outer");
+      let bbox = null;
+      try { bbox = outerPath?.getBBox?.() || null; } catch (_) { bbox = null; }
+
+      const strokeWAttr = outerPath?.getAttribute?.("stroke-width");
+      const strokeW = Number(strokeWAttr) || 3.2;
+
+      const pad = 8; // breathing room outside outline
+      const leftEdge = bbox ? (bbox.x - strokeW / 2) : 15;
+
+      // place ticks OUTSIDE (left of) the outline, extending toward the outline
+      const x2 = Math.max(0, leftEdge - pad);      // closest to outline (still outside)
+      const xMajor1 = Math.max(0, x2 - 14);        // further left
+      const xMinor1 = Math.max(0, x2 - 8);
+      const xLabel = Math.max(0, xMajor1 - 8);
 
       let minS = Number(this._config.min ?? -20);
       let maxS = Number(this._config.max ?? 40);
@@ -235,23 +284,32 @@ class AndyTemperatureCard extends LitElement {
       const start = Math.ceil(minS / minorStep) * minorStep;
       const end = Math.floor(maxS / minorStep) * minorStep;
 
-      const xLabel = 92;
-      const xMajor1 = 108;
-      const xMinor1 = 114;
-      const x2 = 122;
-
       const NS = "http://www.w3.org/2000/svg";
+
+      const mode = String(this._config.scale_color_mode || "per_interval");
+      const currentValue = this._getStateValue(this._config.entity);
+      const activeInterval = (currentValue == null) ? null : normalizeInterval(this._findIntervalForValue(currentValue));
+      const activeScaleColor = normalizeHex(activeInterval?.scale_color, "#ffffff");
+
+      const tickColorFor = (tickValue) => {
+        if (mode === "active_interval") return activeScaleColor;
+        const itTick = normalizeInterval(this._findIntervalForValue(tickValue));
+        return normalizeHex(itTick?.scale_color, "#ffffff");
+      };
 
       for (let v = start; v <= end + 1e-9; v += minorStep) {
         const y = posY(v);
         const isMajor = Math.abs(v / majorStep - Math.round(v / majorStep)) < 1e-9;
+
+        const c = tickColorFor(v);
 
         const line = document.createElementNS(NS, "line");
         line.setAttribute("x1", String(isMajor ? xMajor1 : xMinor1));
         line.setAttribute("y1", String(y));
         line.setAttribute("x2", String(x2));
         line.setAttribute("y2", String(y));
-        line.setAttribute("stroke", `rgba(255,255,255,${isMajor ? 0.92 : 0.55})`);
+        line.setAttribute("stroke", c);
+        line.setAttribute("stroke-opacity", String(isMajor ? 0.92 : 0.55));
         line.setAttribute("stroke-width", String(isMajor ? 2.8 : 1.6));
         line.setAttribute("stroke-linecap", "round");
         layer.appendChild(line);
@@ -260,7 +318,8 @@ class AndyTemperatureCard extends LitElement {
           const text = document.createElementNS(NS, "text");
           text.setAttribute("x", String(xLabel));
           text.setAttribute("y", String(y + 4));
-          text.setAttribute("fill", "rgba(255,255,255,0.90)");
+          text.setAttribute("fill", c);
+          text.setAttribute("fill-opacity", "0.90");
           text.setAttribute("font-size", "12");
           text.setAttribute("font-weight", "900");
           text.setAttribute("text-anchor", "end");
@@ -269,7 +328,7 @@ class AndyTemperatureCard extends LitElement {
         }
       }
     } catch (e) {
-      console.warn("Andy Temperature Card v16.36: scale DOM draw failed", e);
+      console.warn("Andy Temperature Card v1.0.3: scale DOM draw failed", e);
     }
   }
 
@@ -309,32 +368,36 @@ class AndyTemperatureCard extends LitElement {
     const showStats = !!this._config.show_stats;
     const stats = this._stats || { min: null, avg: null, max: null, samples: 0 };
 
+    const isHorizontal = (this._config.orientation === "horizontal");
+
     return html`
       <ha-card>
-        <div class="wrap">
-          <div class="header ${vp}">
-            <div class="title">${name}</div>
-            ${showHeaderValue ? html`
-              <div class="value" style="${valueStyle}">${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}</div>
-            ` : ""}
-          </div>
-
-          <div class="iconRow">
-            <div class="iconWrap">
-              ${this._thermoSvg({ value, interval, glassOn })}
-              ${showInsideValue ? html`
-                <div class="value inside" style="${valueStyle}">${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}</div>
+        <div class="wrap ${isHorizontal ? "orient-horizontal" : "orient-vertical"}">
+          <div class="rotator">
+            <div class="header ${vp}">
+              <div class="title">${name}</div>
+              ${showHeaderValue ? html`
+                <div class="value" style="${valueStyle}">${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}</div>
               ` : ""}
             </div>
-          </div>
 
-          ${showBottomValue ? html`
-            <div class="bottom ${vp}">
-              <div class="value" style="${valueStyle}">${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}</div>
+            <div class="iconRow">
+              <div class="iconWrap">
+                ${this._thermoSvg({ value, interval, glassOn })}
+                ${showInsideValue ? html`
+                  <div class="value inside" style="${valueStyle}">${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}</div>
+                ` : ""}
+              </div>
             </div>
-          ` : ""}
 
-          ${showStats ? this._renderStatsRow(stats, decimals, unit) : ""}
+            ${showBottomValue ? html`
+              <div class="bottom ${vp}">
+                <div class="value" style="${valueStyle}">${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}</div>
+              </div>
+            ` : ""}
+
+            ${showStats ? this._renderStatsRow(stats, decimals, unit) : ""}
+          </div>
         </div>
       </ha-card>
     `;
@@ -364,7 +427,6 @@ class AndyTemperatureCard extends LitElement {
     const gFrom = normalizeHex(it.gradient?.from, cSolid);
     const gTo = normalizeHex(it.gradient?.to, gFrom);
 
-    // LOCKED: liquid Y uses SAME geometry as ticks (top=26, bottom=208)
     let minS = Number(this._config.min ?? -20);
     let maxS = Number(this._config.max ?? 40);
     if (!Number.isFinite(minS)) minS = -20;
@@ -467,6 +529,18 @@ class AndyTemperatureCard extends LitElement {
       ha-card { border-radius: 18px; overflow: hidden; }
       .wrap { padding: 16px; }
 
+      .wrap.orient-horizontal {
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        min-height: 260px;
+      }
+      .wrap.orient-horizontal .rotator {
+        transform: rotate(90deg);
+        transform-origin: center;
+      }
+      .wrap.orient-vertical .rotator { transform: none; }
+
       .header { display:flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
       .header.top_center { justify-content:center; text-align:center; flex-direction:column; align-items:center; }
 
@@ -509,24 +583,22 @@ class AndyTemperatureCard extends LitElement {
   }
 }
 
-if (!customElements.get("andy-temperature-card")) {
-  customElements.define("andy-temperature-card", AndyTemperatureCard);
+if (!customElements.get("andy-temperature-card-development")) {
+  customElements.define("andy-temperature-card-development", AndyTemperatureCard);
 }
 
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: "andy-temperature-card",
-  name: "Andy Temperature Card",
-  description: "Thermometer with locked scale + intervals (fill/gradient/outline) + glass + min/avg/max (REST history).",
+  type: "andy-temperature-card-development",
+  name: "Andy Temperature Card (Dev)",
+  description: "Thermometer with locked scale + intervals (fill/gradient/outline) + per-interval scale coloring + glass + orientation + min/avg/max (REST history).",
 });
 
 /* =============================================================================
  * Editor (HTMLElement)
- * - No animation toggle anymore
- * - Only stop bubbling out (bubble-phase). No capture-phase blockers.
  * ============================================================================= */
 
-const EDITOR_TAG = "andy-temperature-card-editor";
+const EDITOR_TAG = "andy-temperature-card-development-editor";
 
 const DEFAULTS = {
   name: "Temperature",
@@ -538,18 +610,21 @@ const DEFAULTS = {
   value_position: "top_right",
   value_font_size: 0,
   glass: true,
+  orientation: "vertical",
   show_scale: false,
+  scale_color_mode: "per_interval",
   show_stats: false,
   stats_hours: 24,
-  intervals: deepClone(DEFAULT_INTERVALS),
+  intervals: deepClone(DEFAULT_INTERVALS).map(normalizeInterval),
 };
 
 class AndyTemperatureCardEditor extends HTMLElement {
   setConfig(config) {
     const incomingRaw = { ...DEFAULTS, ...(config || {}) };
-
-    // Remove legacy key if present
     if ("liquid_animation" in incomingRaw) delete incomingRaw.liquid_animation;
+
+    incomingRaw.orientation = (String(incomingRaw.orientation) === "horizontal") ? "horizontal" : "vertical";
+    incomingRaw.scale_color_mode = (String(incomingRaw.scale_color_mode) === "active_interval") ? "active_interval" : "per_interval";
 
     if (!Array.isArray(incomingRaw.intervals) || incomingRaw.intervals.length === 0) incomingRaw.intervals = deepClone(DEFAULT_INTERVALS);
     incomingRaw.intervals = incomingRaw.intervals.map(normalizeInterval);
@@ -571,7 +646,10 @@ class AndyTemperatureCardEditor extends HTMLElement {
     if (this._built) return;
     this._built = true;
 
-    const stopBubble = (e) => e.stopPropagation();
+    const stopBubble = (e) => {
+      if (e?.target?.matches?.('input[type="color"]')) return;
+      e.stopPropagation();
+    };
 
     const root = document.createElement("div");
     root.className = "form";
@@ -611,7 +689,6 @@ class AndyTemperatureCardEditor extends HTMLElement {
         sel.appendChild(item);
       });
 
-      // Stop bubbling OUT of editor (but do not block control)
       sel.addEventListener("click", stopBubble);
       sel.addEventListener("opened", stopBubble);
       sel.addEventListener("closed", stopBubble);
@@ -650,7 +727,6 @@ class AndyTemperatureCardEditor extends HTMLElement {
       return ep;
     };
 
-    // ---------- Build UI ----------
     this._elEntity = mkEntityControl();
     root.appendChild(this._elEntity);
 
@@ -677,6 +753,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
     const rowVP = document.createElement("div");
     rowVP.className = "grid2";
+
     this._elValuePos = mkSelect("Value position", "value_position", [
       ["top_right", "Top right"],
       ["top_center", "Top center"],
@@ -688,10 +765,13 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
     const secTog = document.createElement("div");
     secTog.className = "toggles";
+
     const { wrap: swGlassWrap, sw: swGlass } = mkSwitch("Glass effect", "glass");
     this._swGlass = swGlass;
+
     const { wrap: swScaleWrap, sw: swScale } = mkSwitch("Show scale (ticks)", "show_scale");
     this._swScale = swScale;
+
     const { wrap: swStatsWrap, sw: swStats } = mkSwitch("Show Min/Avg/Max (history)", "show_stats");
     this._swStats = swStats;
 
@@ -702,10 +782,30 @@ class AndyTemperatureCardEditor extends HTMLElement {
     rowVP.appendChild(secTog);
     root.appendChild(rowVP);
 
+    const rowOpt = document.createElement("div");
+    rowOpt.className = "grid2";
+
+    this._elOrientation = mkSelect("Orientation", "orientation", [
+      ["vertical", "Vertical"],
+      ["horizontal", "Horizontal"],
+    ]);
+    rowOpt.appendChild(this._elOrientation);
+
+    this._elScaleMode = mkSelect("Scale color mode", "scale_color_mode", [
+      ["per_interval", "Per interval"],
+      ["active_interval", "Active interval"],
+    ]);
+    rowOpt.appendChild(this._elScaleMode);
+
+    root.appendChild(rowOpt);
+
     this._elStatsHours = mkText("Stats lookback hours", "stats_hours", "number", "24");
     root.appendChild(this._elStatsHours);
 
-    // Intervals
+    // Intervals UI remains the same as v1.0.3 (id-based edit/delete + scale_color field)
+    // (Kept unchanged intentionally)
+
+    // ---- intervals section (unchanged) ----
     const secInt = document.createElement("div");
     secInt.className = "section";
     const secTitle = document.createElement("div");
@@ -776,7 +876,6 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this.appendChild(style);
     this.appendChild(root);
 
-    // Only stop bubbling out of editor (bubble phase), NOT capture phase
     this.addEventListener("click", stopBubble);
     this.addEventListener("mousedown", stopBubble);
     this.addEventListener("mouseup", stopBubble);
@@ -784,6 +883,9 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this.addEventListener("pointerup", stopBubble);
     this.addEventListener("keydown", stopBubble);
   }
+
+  // ---- The rest of the editor code (interval list + draft UI + commit/onChange) is identical to v1.0.3 ----
+  // To keep this file complete and consistent, we include it verbatim below.
 
   _sync() {
     if (!this._hass || !this._config) return;
@@ -805,6 +907,9 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._swScale.checked = !!this._config.show_scale;
     this._swStats.checked = !!this._config.show_stats;
 
+    this._elOrientation.value = this._config.orientation || "vertical";
+    this._elScaleMode.value = this._config.scale_color_mode || "per_interval";
+
     this._elStatsHours.style.display = this._config.show_stats ? "" : "none";
     this._elStatsHours.value = String(this._config.stats_hours ?? 24);
 
@@ -816,8 +921,9 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const list = this._intervalList;
     list.innerHTML = "";
 
-    const intervals = (this._config.intervals || []).map(normalizeInterval).sort((a,b)=>a.to-b.to);
-    intervals.forEach((it, idx) => {
+    const intervals = (this._config.intervals || []).map(normalizeInterval).sort((a, b) => a.to - b.to);
+
+    intervals.forEach((it) => {
       const row = document.createElement("div");
       row.className = "intervalItem";
 
@@ -829,11 +935,15 @@ class AndyTemperatureCardEditor extends HTMLElement {
       badgeOutline.className = "badge";
       badgeOutline.style.background = it.outline;
 
+      const badgeScale = document.createElement("div");
+      badgeScale.className = "badge";
+      badgeScale.style.background = it.scale_color || it.color;
+
       const text = document.createElement("div");
       text.className = "itText";
       text.innerHTML = `
         <div class="itTitle">≤ ${it.to}</div>
-        <div class="itSub">Fill: ${it.gradient?.enabled ? `${it.gradient.from} → ${it.gradient.to}` : it.color} • Outline: ${it.outline}</div>
+        <div class="itSub">Fill: ${it.gradient?.enabled ? `${it.gradient.from} → ${it.gradient.to}` : it.color} • Outline: ${it.outline} • Scale: ${it.scale_color || it.color}</div>
       `;
 
       const btns = document.createElement("div");
@@ -841,18 +951,19 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
       const bEdit = document.createElement("mwc-button");
       bEdit.innerText = "Edit";
-      bEdit.addEventListener("click", (e) => { e.stopPropagation(); this._startEdit(idx); });
+      bEdit.addEventListener("click", (e) => { e.stopPropagation(); this._startEdit(it.id); });
 
       const bDel = document.createElement("mwc-button");
       bDel.className = "danger";
       bDel.innerText = "Delete";
-      bDel.addEventListener("click", (e) => { e.stopPropagation(); this._deleteInterval(idx); });
+      bDel.addEventListener("click", (e) => { e.stopPropagation(); this._deleteInterval(it.id); });
 
       btns.appendChild(bEdit);
       btns.appendChild(bDel);
 
       row.appendChild(badgeFill);
       row.appendChild(badgeOutline);
+      row.appendChild(badgeScale);
       row.appendChild(text);
       row.appendChild(btns);
 
@@ -861,40 +972,45 @@ class AndyTemperatureCardEditor extends HTMLElement {
   }
 
   _startAdd() {
-    this._editingIndex = null;
+    this._editingId = null;
     this._draft = normalizeInterval({
+      id: uid("it"),
       to: 0,
       color: "#22c55e",
       outline: "#ffffff",
+      scale_color: "#22c55e",
       gradient: { enabled: false, from: "#22c55e", to: "#22c55e" }
     });
     this._renderDraft(true);
   }
 
-  _startEdit(idx) {
-    const it = (this._config.intervals || [])[idx];
-    this._editingIndex = idx;
+  _startEdit(id) {
+    const it = (this._config.intervals || []).map(normalizeInterval).find(x => x.id === id);
+    this._editingId = id;
     this._draft = normalizeInterval(deepClone(it || {}));
     this._renderDraft(true);
   }
 
-  _deleteInterval(idx) {
-    const next = (this._config.intervals || []).filter((_, i) => i !== idx);
+  _deleteInterval(id) {
+    const next = (this._config.intervals || []).map(normalizeInterval).filter((x) => x.id !== id);
     this._commit("intervals", next.map(normalizeInterval));
   }
 
   _closeDraft() {
     this._draft = null;
-    this._editingIndex = null;
+    this._editingId = null;
     this._renderDraft(false);
   }
 
   _saveDraft() {
     if (!this._draft) return;
     const d = normalizeInterval(this._draft);
-    const cur = (this._config.intervals || []).slice();
-    if (this._editingIndex == null) cur.push(d);
-    else cur[this._editingIndex] = d;
+    const cur = (this._config.intervals || []).map(normalizeInterval);
+
+    const idx = cur.findIndex(x => x.id === d.id);
+    if (idx === -1) cur.push(d);
+    else cur[idx] = d;
+
     this._commit("intervals", cur.map(normalizeInterval));
     this._closeDraft();
   }
@@ -912,7 +1028,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
     const head = document.createElement("div");
     head.className = "draftHead";
-    head.innerHTML = `<div>${this._editingIndex == null ? "Add interval" : "Edit interval"}</div>`;
+    head.innerHTML = `<div>${this._editingId == null ? "Add interval" : "Edit interval"}</div>`;
     const btnClose = document.createElement("mwc-button");
     btnClose.innerText = "Close";
     btnClose.addEventListener("click", (e) => { e.stopPropagation(); this._closeDraft(); });
@@ -968,8 +1084,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
         setVal(n);
       });
 
-      btn.addEventListener("input", (e) => {
-        e.stopPropagation();
+      btn.addEventListener("input", () => {
         const n = String(btn.value || cur).toUpperCase();
         tf.value = n;
         setVal(n);
@@ -982,6 +1097,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
     box.appendChild(mkDraftColor("Fill color (HEX)", () => this._draft.color, (v) => { this._draft.color = v; }));
     box.appendChild(mkDraftColor("Outline color (HEX)", () => this._draft.outline, (v) => { this._draft.outline = v; }));
+    box.appendChild(mkDraftColor("Scale color (HEX)", () => this._draft.scale_color, (v) => { this._draft.scale_color = v; }));
 
     if (this._draft.gradient?.enabled) {
       box.appendChild(mkDraftColor(
@@ -1035,14 +1151,12 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const key = target.configValue || target.dataset?.configValue;
     if (!key) return;
 
-    // switches
     if (typeof target.checked !== "undefined") {
       return this._commit(key, target.checked);
     }
 
     let value = this._eventValue(ev, target);
 
-    // numbers
     if (key === "min" || key === "max" || key === "value_font_size" || key === "stats_hours") {
       value = value === "" ? 0 : Number(value);
       return this._commit(key, value);
@@ -1053,7 +1167,6 @@ class AndyTemperatureCardEditor extends HTMLElement {
       return this._commit(key, value);
     }
 
-    // strings / selects / entity
     return this._commit(key, value);
   }
 }
