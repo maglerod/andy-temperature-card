@@ -15,13 +15,14 @@
  *
  * Install: Se README.md in GITHUB
  *
- * Changelog 1.0.4 - 2026-01-02
+ *Changelog 1.0.4 - 2026-01-02
  * - Improved scale rendering (outside the outline)
  * - Fixed the Interval Edit / Delete issues
  * - Added the posibility to change scale color, can be done in each interval in 2 modes: per interval (coloring the specific interval only) or active interval (same color for the whole scale)
  * - Added support for horizontal / vertical mode
  *
- *
+ *1.0.5 - 2026-01-03
+ * - Fixed the Interval Color edit from autoclosing
  */
 
 console.info("Andy Temperature Card loaded: v1.0.4");
@@ -645,6 +646,16 @@ class AndyTemperatureCardEditor extends HTMLElement {
   _buildOnce() {
     if (this._built) return;
     this._built = true;
+    //2026-01-03 V1.0.5 Fix color picker autoclosing
+    this._isPickingColor = false;
+    if (!this._winFocusBound) {
+      this._winFocusBound = true;
+      window.addEventListener("focus", () => {
+        // Native color dialog stjäl fokus; när den stängs kommer fokus tillbaka hit.
+        // Liten timeout så event-sekvensen hinner bli klar.
+        setTimeout(() => { this._isPickingColor = false; }, 0);
+      });
+    }
 
     const stopBubble = (e) => {
       if (e?.target?.matches?.('input[type="color"]')) return;
@@ -889,6 +900,13 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
   _sync() {
     if (!this._hass || !this._config) return;
+    //2026-01-03  V1.0.5 Fix color picker autoclosing
+    // IMPORTANT: do not rebuild draft UI while native color picker is open
+    if (this._isPickingColor) {
+      // still keep entity control updated if needed
+      if (this._elEntity) this._elEntity.hass = hass;
+      return;
+    }
 
     this._elEntity.hass = this._hass;
     this._elEntity.value = this._config.entity || "";
@@ -914,7 +932,8 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._elStatsHours.value = String(this._config.stats_hours ?? 24);
 
     this._renderIntervals();
-    this._renderDraft();
+    //2026-01-03  V1.0.5 Fix color picker autoclosing
+    if (!this._isPickingColor) this._renderDraft();
   }
 
   _renderIntervals() {
@@ -1000,6 +1019,8 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._draft = null;
     this._editingId = null;
     this._renderDraft(false);
+    //2026-01-03  V1.0.5 Fix color picker autoclosing
+    this._isPickingColor = false;
   }
 
   _saveDraft() {
@@ -1070,6 +1091,18 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
       const btn = document.createElement("input");
       btn.type = "color";
+      //2026-01-03 V1.0.5 Fix color picker autoclosing
+      // --- prevent HA hass-refresh from re-rendering draft while native picker is open ---
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._isPickingColor = true;
+      });
+      // When picker closes (either user picks or cancels), focus returns to window
+      // We'll clear the flag on window focus (added once in _buildOnce)
+      btn.addEventListener("change", () => {
+        this._isPickingColor = false;
+      })
+      
       btn.className = "colorBtn";
 
       const cur = normalizeHex(getVal(), "#ffffff");
