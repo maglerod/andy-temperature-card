@@ -75,8 +75,6 @@ If the card does not appear automatically:
 - **Resource type**: `JavaScript Module`
 4. Save and perform a **hard refresh** in your browser (`Ctrl+F5` / `Cmd+Shift+R`).
 
-[![Buy Me a Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=☕&slug=andybonde&button_colour=FFDD00&font_colour=000000&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/andybonde)
-
 ---
 
 ### Add the card to a dashboard
@@ -138,4 +136,8 @@ intervals:
       from: "#ef4444"
       to: "#ef4444"
 type: custom:andy-temperature-card
+```
+
+## ☕ Support the project 
+[![Buy Me a Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=☕&slug=andybonde&button_colour=FFDD00&font_colour=000000&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/andybonde)
 
