@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v1.0.4
+ * v1.0.5
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -15,22 +15,32 @@
  *
  * Install: Se README.md in GITHUB
  *
- *Changelog 1.0.4 - 2026-01-02
+ * Changelog 1.0.5 - 2026-01-07
+ * - Added Name position
+ * - Added Card scale function (0.2 - 4.0)
+ * - Added History graph feature
+ * - Added Time ticks below historygraph feature
+ * - Added 3 Extra entities for example: Humidity, preassure etc
+ * - Click on Main entity to get more information / history
+ * - Fixed visual config editor issues
+ * - Fixed the Value inside icon position
+ *
+ * Changelog 1.0.4 - 2026-01-02
  * - Improved scale rendering (outside the outline)
  * - Fixed the Interval Edit / Delete issues
  * - Added the posibility to change scale color, can be done in each interval in 2 modes: per interval (coloring the specific interval only) or active interval (same color for the whole scale)
  * - Added support for horizontal / vertical mode
  *
- *1.0.5 - 2026-01-03
- * - Fixed the Interval Color edit from autoclosing
  */
 
-console.info("Andy Temperature Card loaded: v1.0.4");
+console.info("Andy Temperature Card loaded: v1.0.5");
 
 const LitElement =
   window.LitElement || Object.getPrototypeOf(customElements.get("ha-panel-lovelace"));
 const html = window.html || LitElement.prototype.html;
 const css = window.css || LitElement.prototype.css;
+const svg  = window.svg  || LitElement.prototype.svg || html;
+
 
 const DEFAULT_INTERVALS = [
   { id: "it0", to: 0,   color: "#2b6cff", outline: "#ffffff", scale_color: "#2b6cff", gradient: { enabled: false, from: "#2b6cff", to: "#2b6cff" } },
@@ -60,7 +70,6 @@ function normalizeInterval(it) {
 
   out.color = normalizeHex(out.color, "#22c55e");
   out.outline = normalizeHex(out.outline, "#ffffff");
-
   out.scale_color = normalizeHex(out.scale_color, out.color);
 
   const g0 = out.gradient || {};
@@ -80,17 +89,57 @@ function fmtNum(v, decimals = 1) {
   return n.toFixed(decimals);
 }
 
+// v1.0.5
+function toLocalHHMM(ts) {
+  try {
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  } catch (_) {
+    return "";
+  }
+}
+
+// Downsample a series to at most maxPoints using bucket averaging.
+function downsampleSeries(series, maxPoints) {
+  const s = series || [];
+  if (s.length <= maxPoints) return s;
+
+  const buckets = maxPoints;
+  const out = [];
+  const n = s.length;
+  for (let b = 0; b < buckets; b++) {
+    const i0 = Math.floor((b * n) / buckets);
+    const i1 = Math.floor(((b + 1) * n) / buckets);
+    if (i1 <= i0) continue;
+
+    let sumV = 0, sumT = 0, c = 0;
+    for (let i = i0; i < i1; i++) {
+      const p = s[i];
+      if (!p) continue;
+      sumV += p.v;
+      sumT += p.t;
+      c++;
+    }
+    if (c) out.push({ t: sumT / c, v: sumV / c });
+  }
+  return out;
+}
+
 class AndyTemperatureCard extends LitElement {
   static get properties() {
     return {
       hass: {},
       _config: { state: true },
       _stats: { state: true },
+      _series: { state: true },
       _lastStatsAt: { state: false },
       _statsBusy: { state: false },
     };
   }
 
+  // *** Viktigt: behåll exception här, som du ville ***
   setConfig(config) {
     if (!config?.entity) throw new Error("You need to define an entity");
 
@@ -101,20 +150,34 @@ class AndyTemperatureCard extends LitElement {
       max: 40,
       unit: "",
       decimals: 1,
-
+      card_scale: 1,
       value_position: "top_right",
       value_font_size: 0,
-
+      name_position: "auto",
       glass: true,
-
       orientation: "vertical",
-
       show_scale: false,
-
       scale_color_mode: "per_interval",
-
       show_stats: false,
       stats_hours: 24,
+      show_graph: false,
+      graph_hours: 24,
+      graph_height: 58,
+      graph_show_time: true,
+      graph_max_points: 160,
+      graph_line_width: 1.0,
+
+      extra_entity_1: "",
+      extra_icon_1: "",
+      extra_label_1: "",
+
+      extra_entity_2: "",
+      extra_icon_2: "",
+      extra_label_2: "",
+
+      extra_entity_3: "",
+      extra_icon_3: "",
+      extra_label_3: "",
 
       intervals: deepClone(DEFAULT_INTERVALS),
     };
@@ -129,9 +192,35 @@ class AndyTemperatureCard extends LitElement {
 
     const ori = String(this._config.orientation || "vertical");
     this._config.orientation = (ori === "horizontal") ? "horizontal" : "vertical";
+    
+    const np = String(this._config.name_position || "auto");
+    this._config.name_position = (np === "left" || np === "center") ? np : "auto";    
 
     const scm = String(this._config.scale_color_mode || "per_interval");
     this._config.scale_color_mode = (scm === "active_interval") ? "active_interval" : "per_interval";
+
+    let cs = Number(this._config.card_scale ?? 1);
+    if (!Number.isFinite(cs) || cs <= 0) cs = 1;
+    this._config.card_scale = Math.max(0.2, Math.min(2.0, cs));
+
+    // graph clamps
+    let gh = Number(this._config.graph_hours ?? this._config.stats_hours ?? 24);
+    if (!Number.isFinite(gh) || gh <= 0) gh = 24;
+    this._config.graph_hours = Math.max(1, Math.min(168, gh));
+
+    let ghPx = Number(this._config.graph_height ?? 58);
+    if (!Number.isFinite(ghPx) || ghPx <= 0) ghPx = 58;
+    this._config.graph_height = Math.max(40, Math.min(120, ghPx));
+
+    let mp = Number(this._config.graph_max_points ?? 160);
+    if (!Number.isFinite(mp) || mp < 30) mp = 160;
+    this._config.graph_max_points = Math.max(30, Math.min(400, mp));
+
+    let lw = Number(this._config.graph_line_width ?? 0.7);
+    if (!Number.isFinite(lw) || lw <= 0) lw = 0.7;
+    this._config.graph_line_width = Math.max(0.3, Math.min(2.0, lw));
+
+
 
     if (!Array.isArray(this._config.intervals) || this._config.intervals.length === 0) {
       this._config.intervals = deepClone(DEFAULT_INTERVALS);
@@ -141,6 +230,7 @@ class AndyTemperatureCard extends LitElement {
     this._stats = null;
     this._lastStatsAt = 0;
     this._statsBusy = false;
+    this._series = null;
   }
 
   static getConfigElement() { return document.createElement("andy-temperature-card-editor"); }
@@ -159,60 +249,279 @@ class AndyTemperatureCard extends LitElement {
     return st?.attributes?.unit_of_measurement ?? "";
   }
 
+  _getUnitForEntity(entityId) {
+    if (!entityId) return "";
+    const st = this.hass?.states?.[entityId];
+    return st?.attributes?.unit_of_measurement ?? "";
+  }
+
+  _inferExtraIcon(entityId) {
+    const st = this.hass?.states?.[entityId];
+    const dc = st?.attributes?.device_class;
+    const unit = st?.attributes?.unit_of_measurement;
+
+    if (dc === "humidity" || unit === "%") return "mdi:water-percent";
+    if (dc === "carbon_dioxide") return "mdi:molecule-co2";
+    if (dc === "pm25" || dc === "pm10") return "mdi:blur";
+    if (String(entityId || "").toLowerCase().includes("air_quality")) return "mdi:air-filter";
+
+    return "mdi:information-outline";
+  }
+
+  _hasExtras() {
+    return !!(String(this._config?.extra_entity_1 || "").trim()
+      || String(this._config?.extra_entity_2 || "").trim()
+      || String(this._config?.extra_entity_3 || "").trim());
+  }
+
+  _renderExtraValues() {
+    const rows = [];
+
+    const addRow = (n) => {
+      const entity = String(this._config?.[`extra_entity_${n}`] || "").trim();
+      if (!entity) return;
+
+      const st = this.hass?.states?.[entity];
+      const raw = st?.state;
+      const num = Number(raw);
+      const hasNum = Number.isFinite(num);
+
+      const unit = this._getUnitForEntity(entity);
+//      const label = String(this._config?.[`extra_label_${n}`] || "").trim()
+//        || (st?.attributes?.friendly_name ?? entity);
+      const rawLabel = String(this._config?.[`extra_label_${n}`] || "").trim();
+      const label = rawLabel !== "" ? rawLabel : "";  // visa aldrig default label
+        
+      const icon = String(this._config?.[`extra_icon_${n}`] || "").trim()
+        || this._inferExtraIcon(entity);
+
+      const decimals = Number(this._config?.decimals ?? 1);
+      const valueText = hasNum
+        ? (fmtNum(num, Number.isFinite(decimals) ? decimals : 1) ?? String(num))
+        : (raw ?? "—");
+
+      rows.push(html`
+        <div class="extraRow">
+          <ha-icon class="extraIcon" icon="${icon}"></ha-icon>
+          <div class="extraText">
+            ${label ? html`<div class="extraLabel">${label}</div>` : ""}
+            <div class="extraValue">
+              ${valueText}${unit ? html`<span class="extraUnit">${unit}</span>` : ""}
+            </div>
+          </div>
+        </div>
+      `);
+    };
+
+    addRow(1);
+    addRow(2);
+    addRow(3);
+
+    if (!rows.length) return "";
+
+    return html`<div class="extras">${rows}</div>`;
+  }
+
   _findIntervalForValue(value) {
     const intervals = intervalsSortedByTo(this._config.intervals);
     for (const it of intervals) if (value <= it.to) return it;
     return intervals.length ? intervals[intervals.length - 1] : normalizeInterval(DEFAULT_INTERVALS[2]);
   }
 
+  _openMoreInfo() {
+    const entityId = this._config?.entity;
+    if (!entityId) return;
+
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      detail: { entityId },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  // *** v1.0.5.7 – robust + debug, men använder fortfarande REST history ***
   async _maybeUpdateStats() {
-    if (!this.hass || !this._config?.show_stats) return;
+    if (!this.hass || !this._config) return;
+
+    const needStats = !!this._config.show_stats;
+    const needGraph = !!this._config.show_graph;
+    if (!needStats && !needGraph) return;
 
     const now = Date.now();
     const throttleMs = 3 * 60 * 1000;
+
     if (this._statsBusy) return;
-    if (this._lastStatsAt && (now - this._lastStatsAt) < throttleMs && this._stats) return;
 
-    const hours = Number(this._config.stats_hours ?? 24);
-    const hrs = Number.isFinite(hours) && hours > 0 ? hours : 24;
+    if (
+      this._lastStatsAt &&
+      now - this._lastStatsAt < throttleMs &&
+      this._stats &&
+      (!needGraph || this._series)
+    ) {
+      return;
+    }
 
-    const end = new Date();
-    const start = new Date(end.getTime() - hrs * 3600 * 1000);
     const entityId = this._config.entity;
     if (!entityId) return;
 
+    const rawHours = needGraph
+      ? (this._config.graph_hours ?? this._config.stats_hours ?? 24)
+      : (this._config.stats_hours ?? 24);
+
+    let hours = Number(rawHours);
+    if (!Number.isFinite(hours) || hours <= 0) hours = 24;
+
+    const end = new Date();
+    const start = new Date(end.getTime() - hours * 3600 * 1000);
+
+    const startIso = start.toISOString();
+    const endIso = end.toISOString();
+
+    const path =
+      `history/period/${encodeURIComponent(startIso)}` +
+      `?filter_entity_id=${encodeURIComponent(entityId)}` +
+      `&end_time=${encodeURIComponent(endIso)}`;
+
     this._statsBusy = true;
 
+    //console.warn("Andy Temp v1.0.5.8 _maybeUpdateStats", {
+    //  needStats,
+    //  needGraph,
+    //  entityId,
+    //  path,
+    //});
+
     try {
-      const startIso = start.toISOString();
-      const endIso = end.toISOString();
-      const path = `history/period/${encodeURIComponent(startIso)}?end_time=${encodeURIComponent(endIso)}&filter_entity_id=${encodeURIComponent(entityId)}&minimal_response`;
       const data = await this.hass.callApi("GET", path);
 
-      const series = Array.isArray(data) && data.length ? data[0] : [];
-      const nums = [];
+      //console.warn("Andy Temp v1.0.5.7 history raw data", {
+    //    type: Array.isArray(data) ? "array" : typeof data,
+    //    outerLength: Array.isArray(data) ? data.length : undefined,
+    //    keys: data && !Array.isArray(data) && typeof data === "object"
+    //      ? Object.keys(data)
+    //      : undefined,
+    //  });
 
-      for (const item of series) {
-        const raw = item?.state ?? item?.s;
-        const n = Number(raw);
-        if (Number.isFinite(n)) nums.push(n);
-      }
+      let seriesRaw;
 
-      if (!nums.length) {
-        this._stats = { min: null, avg: null, max: null, samples: 0 };
-      } else {
-        let min = nums[0], max = nums[0], sum = 0;
-        for (const n of nums) {
-          if (n < min) min = n;
-          if (n > max) max = n;
-          sum += n;
+      if (Array.isArray(data)) {
+        seriesRaw = data.length ? data[0] : [];
+      } else if (data && typeof data === "object") {
+        const keys = Object.keys(data);
+        if (keys.length && Array.isArray(data[keys[0]])) {
+          seriesRaw = keys[0];
+        } else {
+          seriesRaw = [];
         }
-        this._stats = { min, avg: sum / nums.length, max, samples: nums.length };
+      } else {
+        seriesRaw = [];
       }
+
+      //console.warn("Andy Temp v1.0.5.8 seriesRaw length", seriesRaw?.length);
+
+      const nums = [];
+      const points = [];
+
+      for (const item of (seriesRaw || [])) {
+        const rawState = item?.state ?? item?.s;
+        const n = Number(rawState);
+        if (!Number.isFinite(n)) continue;
+        nums.push(n);
+      }
+
+      //console.warn("Andy Temp v1.0.5.7 numeric samples", nums.length);
+
+      // Graph data
+      if (needGraph) {
+        if (nums.length) {
+          const tStart = start.getTime();
+          const tEnd = end.getTime();
+          const span = (tEnd - tStart) || 1;
+          const N = nums.length;
+
+          for (let i = 0; i < N; i++) {
+            const v = nums[i];
+            const frac = N === 1 ? 0 : i / (N - 1);
+            const t = tStart + frac * span;
+            points.push({ t, v });
+          }
+
+          const maxPts = Number(this._config.graph_max_points ?? 160);
+          const sampled = downsampleSeries(
+            points,
+            Number.isFinite(maxPts) ? maxPts : 160
+          );
+          this._series = sampled;
+          //console.warn("Andy Temp v1.0.5.7 graph points", this._series.length);
+        } else {
+          const cur = this._getStateValue(this._config.entity);
+          if (cur != null) {
+            const tStart = start.getTime();
+            const tEnd = end.getTime();
+            const mid = (tStart + tEnd) / 2;
+
+            this._series = [
+              { t: tStart, v: cur },
+              { t: mid,   v: cur },
+              { t: tEnd,  v: cur },
+            ];
+          } else {
+            this._series = [];
+          }
+          //console.warn("Andy Temp v1.0.5.7 graph fallback series length", this._series.length);
+        }
+      } else {
+        this._series = null;
+      }
+
+      // Stats
+      if (needStats) {
+        if (!nums.length) {
+          this._stats = { min: null, avg: null, max: null, samples: 0 };
+        } else {
+          let min = nums[0], max = nums[0], sum = 0;
+          for (const n of nums) {
+            if (n < min) min = n;
+            if (n > max) max = n;
+            sum += n;
+          }
+          this._stats = {
+            min,
+            avg: sum / nums.length,
+            max,
+            samples: nums.length,
+          };
+        }
+      } else {
+        this._stats = null;
+      }
+
       this._lastStatsAt = now;
-    } catch (e) {
-      console.warn("Andy Temperature Card v1.0.4:  history fetch failed (REST)", e);
-      this._stats = { min: null, avg: null, max: null, samples: 0, error: true };
+    } catch (err) {
+      console.error(
+        "Andy Temperature Card v1.0.5.8: history fetch failed",
+        err,
+        path
+      );
+
+      if (needStats) {
+        this._stats = {
+          min: null,
+          avg: null,
+          max: null,
+          samples: 0,
+          error: true,
+        };
+      } else {
+        this._stats = null;
+      }
+
+      if (needGraph) {
+        this._series = [];
+      } else {
+        this._series = null;
+      }
+
       this._lastStatsAt = now;
     } finally {
       this._statsBusy = false;
@@ -228,7 +537,6 @@ class AndyTemperatureCard extends LitElement {
     }
   }
 
-  // --- SCALE: LEFT of outline, auto-placed outside widest point (bbox + stroke) ---
   _drawScaleDom() {
     try {
       const showScale = !!this._config?.show_scale;
@@ -244,7 +552,6 @@ class AndyTemperatureCard extends LitElement {
       while (layer.firstChild) layer.removeChild(layer.firstChild);
       if (!showScale) return;
 
-      // detect outline left edge: outer path bbox + stroke width
       const outerPath = svgEl.querySelector("path.outer");
       let bbox = null;
       try { bbox = outerPath?.getBBox?.() || null; } catch (_) { bbox = null; }
@@ -252,12 +559,11 @@ class AndyTemperatureCard extends LitElement {
       const strokeWAttr = outerPath?.getAttribute?.("stroke-width");
       const strokeW = Number(strokeWAttr) || 3.2;
 
-      const pad = 8; // breathing room outside outline
+      const pad = 8;
       const leftEdge = bbox ? (bbox.x - strokeW / 2) : 15;
 
-      // place ticks OUTSIDE (left of) the outline, extending toward the outline
-      const x2 = Math.max(0, leftEdge - pad);      // closest to outline (still outside)
-      const xMajor1 = Math.max(0, x2 - 14);        // further left
+      const x2 = Math.max(0, leftEdge - pad);
+      const xMajor1 = Math.max(0, x2 - 14);
       const xMinor1 = Math.max(0, x2 - 8);
       const xLabel = Math.max(0, xMajor1 - 8);
 
@@ -269,7 +575,6 @@ class AndyTemperatureCard extends LitElement {
 
       const range = (maxS - minS) || 1;
 
-      // LOCKED geometry
       const topY = 26;
       const bottomY = 208;
       const usable = bottomY - topY;
@@ -329,7 +634,7 @@ class AndyTemperatureCard extends LitElement {
         }
       }
     } catch (e) {
-      console.warn("Andy Temperature Card v1.0.4: scale DOM draw failed", e);
+      console.warn("Andy Temperature Card v1.0.5.8: scale DOM draw failed", e);
     }
   }
 
@@ -351,11 +656,26 @@ class AndyTemperatureCard extends LitElement {
       `;
     }
 
+    //const decimals = Number(this._config.decimals ?? 1);
+    //const shown = fmtNum(value, decimals) ?? String(value);
+
+    //const vp = String(this._config.value_position || "top_right");
+    //const showHeaderValue = (vp === "top_right" || vp === "top_center");
     const decimals = Number(this._config.decimals ?? 1);
     const shown = fmtNum(value, decimals) ?? String(value);
 
     const vp = String(this._config.value_position || "top_right");
+    const namePos = String(this._config.name_position || "auto");
     const showHeaderValue = (vp === "top_right" || vp === "top_center");
+
+    const headerClasses = ["header"];
+    if (vp === "top_center" && (namePos === "auto" || namePos === "center")) {
+      headerClasses.push("top_center");
+    }
+    const headerClassStr = headerClasses.join(" ");
+
+    
+    
     const showBottomValue = (vp === "bottom_right" || vp === "bottom_center");
     const showInsideValue = (vp === "inside");
 
@@ -371,29 +691,51 @@ class AndyTemperatureCard extends LitElement {
 
     const isHorizontal = (this._config.orientation === "horizontal");
 
+    const cardScale = Number(this._config.card_scale ?? 1);
+    const scaleVarStyle = `--asc-scale:${cardScale};`;
+
     return html`
-      <ha-card>
-        <div class="wrap ${isHorizontal ? "orient-horizontal" : "orient-vertical"}">
+      <ha-card @click=${this._openMoreInfo} style="cursor:pointer;">
+        <div class="wrap ${isHorizontal ? "orient-horizontal" : "orient-vertical"}" style="${scaleVarStyle}">
           <div class="rotator">
-            <div class="header ${vp}">
-              <div class="title">${name}</div>
+                        <div class="${headerClassStr}">
+              ${namePos === "center" && vp !== "top_center"
+                ? html`
+                    <div class="title" style="text-align:center; width:100%;">
+                      ${name}
+                    </div>
+                  `
+                : html`
+                    <div class="title">${name}</div>
+                  `}
               ${showHeaderValue ? html`
-                <div class="value" style="${valueStyle}">${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}</div>
+                <div class="value" style="${valueStyle}">
+                  ${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}
+                </div>
               ` : ""}
             </div>
 
-            <div class="iconRow">
+
+            <div class="iconRow ${this._hasExtras() ? "hasExtras" : ""}">
               <div class="iconWrap">
                 ${this._thermoSvg({ value, interval, glassOn })}
                 ${showInsideValue ? html`
-                  <div class="value inside" style="${valueStyle}">${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}</div>
+                  <div class="value inside" style="${valueStyle}">
+                    ${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}
+                  </div>
                 ` : ""}
               </div>
+
+              ${this._renderExtraValues()}
             </div>
+
+            ${this._config.show_graph ? this._renderGraph() : ""}
 
             ${showBottomValue ? html`
               <div class="bottom ${vp}">
-                <div class="value" style="${valueStyle}">${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}</div>
+                <div class="value" style="${valueStyle}">
+                  ${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}
+                </div>
               </div>
             ` : ""}
 
@@ -417,6 +759,179 @@ class AndyTemperatureCard extends LitElement {
       </div>
     `;
   }
+
+
+// v1.0.5.11 – auto-scale på data + tunnare linje + tids-ticks som verkligen syns
+// v1.0.5.12 – auto-scale + tunn linje + tids-ticks som HTML under grafen
+_renderGraph() {
+  if (!this._config?.show_graph) return "";
+
+  const base = Array.isArray(this._series) ? this._series : null;
+  if (!base || !base.length) {
+    return html`
+      <div class="graphWrap" style="height:${this._config.graph_height}px;">
+        <div class="graphEmpty">No history</div>
+      </div>
+    `;
+  }
+
+  try {
+    // Om bara 1 punkt -> gör en liten “platta”
+    let s = base;
+    if (s.length === 1) {
+      const p = base[0];
+      const t2 = p.t + 60 * 60 * 1000;
+      s = [
+        { t: p.t, v: p.v },
+        { t: t2, v: p.v },
+      ];
+    }
+
+    const heightPx = Number(this._config.graph_height ?? 58);
+    const height = Number.isFinite(heightPx) ? heightPx : 58;
+
+    const W = 260;
+    const H = 60;
+    const padL = 8;
+    const padR = 8;
+    const padT = 6;
+    const padB = 8; // lite bottenmarginal (grafen, inte ticks)
+
+    const innerW = W - padL - padR;
+    const innerH = H - padT - padB;
+
+    const t0 = s[0].t;
+    const t1 = s[s.length - 1].t;
+    const dt = (t1 - t0) || 1;
+
+    // Y-range ENBART baserat på graf-data (inte card min/max)
+    let yMin = s[0].v;
+    let yMax = s[0].v;
+    for (const p of s) {
+      if (p.v < yMin) yMin = p.v;
+      if (p.v > yMax) yMax = p.v;
+    }
+    if (Math.abs(yMax - yMin) < 0.001) {
+      yMin -= 1;
+      yMax += 1;
+    }
+
+    const xFor = (t) => padL + ((t - t0) / dt) * innerW;
+    const yFor = (v) => {
+      const t = clamp01((v - yMin) / (yMax - yMin));
+      return padT + (1 - t) * innerH;
+    };
+
+    const pointsAttr = s.map((p) => `${xFor(p.t)},${yFor(p.v)}`).join(" ");
+
+    const last = s[s.length - 1];
+    const it = normalizeInterval(this._findIntervalForValue(last.v));
+    const c = normalizeHex(it.scale_color || it.color, "#ffffff");
+
+    const lw = Number(this._config.graph_line_width ?? 1.0);
+    const strokeW = Number.isFinite(lw) ? lw : 1.0;
+
+    // Tids-ticks (endast för labels, linjen i grafen kör på t0..t1 ändå)
+    const showTimeTicks = this._config.graph_show_time !== false;
+    const ticks = [];
+    if (showTimeTicks && dt > 0) {
+      const count = 4; // ger 5 ticks (0..4)
+      for (let i = 0; i <= count; i++) {
+        const frac = i / count;
+        const tTick = t0 + frac * dt;
+        ticks.push({ t: tTick, label: toLocalHHMM(tTick) });
+      }
+    }
+
+//    console.warn("Andy Temp v1.0.5.12 ticks (HTML)", {
+//      showTimeTicks,
+//      tickCount: ticks.length,
+//      ticks,
+//    });
+
+    return html`
+      <div class="graphWrap" style="height:${height + (showTimeTicks && ticks.length ? 22 : 0)}px;">
+        <div class="graphInner">
+          <svg
+            class="graph"
+            viewBox="0 0 ${W} ${H}"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label="History graph"
+          >
+            <defs>
+              <filter id="gShadowSimple" x="-20%" y="-40%" width="140%" height="180%">
+                <feDropShadow
+                  dx="0"
+                  dy="2"
+                  stdDeviation="2"
+                  flood-color="rgba(0,0,0,0.30)"
+                />
+              </filter>
+            </defs>
+
+            <rect
+              x="0"
+              y="0"
+              width="${W}"
+              height="${H}"
+              rx="10"
+              ry="10"
+              fill="none"
+              stroke="none"
+            />
+
+            <!-- Själva linjen -->
+            <g filter="url(#gShadowSimple)">
+              <polyline
+                fill="none"
+                stroke="${c}"
+                stroke-width="${strokeW}"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                points="${pointsAttr}"
+              />
+            </g>
+
+            <!-- Marker på sista värdet -->
+            <circle
+              cx="${xFor(last.t)}"
+              cy="${yFor(last.v)}"
+              r="3.4"
+              fill="${c}"
+              stroke="rgba(0,0,0,0.25)"
+              stroke-width="1"
+            />
+          </svg>
+
+          ${showTimeTicks && ticks.length
+            ? html`
+                <div class="graphTicks">
+                  <div class="graphTicksLine"></div>
+                  <div class="graphTicksLabels">
+                    ${ticks.map((ti) => html`<span>${ti.label}</span>`)}
+                  </div>
+                </div>
+              `
+            : ""}
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    console.error("Andy Temp v1.0.5.12 _renderGraph error", e);
+    return html`
+      <div class="graphWrap" style="height:${this._config.graph_height}px;">
+        <div class="graphEmpty">Graph error</div>
+      </div>
+    `;
+  }
+}
+
+
+
+
+
+
 
   _thermoSvg(opts) {
     const { value, interval, glassOn } = opts;
@@ -481,7 +996,6 @@ class AndyTemperatureCard extends LitElement {
           </filter>
         </defs>
 
-        <!-- CRITICAL: shift thermometer drawing left so it is truly centered (DO NOT TOUCH) -->
         <g transform="translate(-50,0)">
           <path class="outer"
             d="M160 10 C144 10 131 23 131 39 V135 C121 147 116 157 116 170 C116 200 140 220 160 220 C180 220 204 200 204 170 C204 157 199 147 189 135 V39 C189 23 176 10 160 10 Z"
@@ -518,7 +1032,6 @@ class AndyTemperatureCard extends LitElement {
             fill="none" stroke="rgba(255,255,255,0.30)" stroke-width="2"/>
         </g>
 
-        <!-- Scale layer (DOM-populated in updated()) -->
         <g class="scale-layer" transform="translate(-50,0)" style="pointer-events:none;" shape-rendering="crispEdges"></g>
       </svg>
     `;
@@ -536,11 +1049,15 @@ class AndyTemperatureCard extends LitElement {
         align-items:center;
         min-height: 260px;
       }
+
       .wrap.orient-horizontal .rotator {
-        transform: rotate(90deg);
+        transform: rotate(90deg) scale(var(--asc-scale, 1));
         transform-origin: center;
       }
-      .wrap.orient-vertical .rotator { transform: none; }
+      .wrap.orient-vertical .rotator {
+        transform: scale(var(--asc-scale, 1));
+        transform-origin: top center;
+      }
 
       .header { display:flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
       .header.top_center { justify-content:center; text-align:center; flex-direction:column; align-items:center; }
@@ -549,20 +1066,22 @@ class AndyTemperatureCard extends LitElement {
       .value { font-weight: 850; letter-spacing: 0.2px; font-size: clamp(14px, 4vw, 22px); line-height: 1.1; }
       .unit { font-size: 12px; opacity: 0.75; margin-left: 4px; font-weight: 700; }
 
-      .iconRow { display:flex; justify-content:center; padding-top: 6px; }
+      .iconRow { display:flex; justify-content:center; padding-top: 6px; align-items:center; }
+      .iconRow.hasExtras { gap: 0px; align-items: flex-start;}
       .iconWrap { position: relative; display:flex; justify-content:center; align-items:center; }
 
       .thermo { width: clamp(210px, 62vw, 260px); height: clamp(150px, 34vw, 182px); display:block; }
 
       .value.inside {
-        position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
-        background: rgba(0,0,0,0.12);
-        border: 1px solid rgba(255,255,255,0.14);
+        position:absolute; bottom:25px; left:50%; transform:translateX(-50%);
+        background: transparent;
+        border: none; 
         padding: 6px 10px; border-radius: 999px;
-        backdrop-filter: blur(6px);
+        backdrop-filter: none;
         font-size: clamp(12px, 3.5vw, 18px);
         font-weight: 850;
         z-index: 4;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.55);
       }
 
       .bottom { margin-top: 10px; display:flex; }
@@ -579,7 +1098,87 @@ class AndyTemperatureCard extends LitElement {
         font-weight: 700;
       }
 
+      .graphWrap {
+        margin-top: 2px;
+        display:flex;
+        justify-content:center;
+        align-items:flex-start;
+      }
+
+      .graphInner {
+        width: clamp(210px, 62vw, 260px);
+        display:flex;
+        flex-direction:column;
+        align-items:stretch;
+      }
+
+      .graph {
+        width: 100%;
+        height: 100%;
+        display:block;
+      }
+
+      .graphTicks {
+        margin-top: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        opacity: 0.9;
+      }
+
+      .graphTicksLine {
+        border-top: 1px solid rgba(255,255,255,0.35);
+        margin-bottom: 2px;
+      }
+
+      .graphTicksLabels {
+        display:flex;
+        justify-content:space-between;
+      }
+
+      .graphTicksLabels span {
+        min-width: 0;
+      }
+
+      .graphEmpty {
+        font-size: 12px;
+        opacity: 0.75;
+        font-weight: 700;
+      }
+
+      .extras {
+        display:flex;
+        flex-direction:column;
+        gap: 2px;
+        min-width: 90px;
+        /* flytta automatiskt närmare beroende på card_scale */
+        margin-left: calc(-50px * var(--asc-scale, 1));
+      }
+
+
+      .extraRow {
+        display:flex;
+        align-items:center;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 14px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.10);
+        backdrop-filter: blur(6px);
+      }
+
+      .extraIcon {
+        opacity: 0.90;
+      }
+
+      .extraText { display:flex; flex-direction:column; line-height: 1.05; }
+      .extraLabel { font-size: 11px; opacity: 0.75; font-weight: 800; }
+      .extraValue { font-size: 14px; font-weight: 900; letter-spacing: 0.2px; }
+      .extraUnit  { font-size: 11px; opacity: 0.75; margin-left: 4px; font-weight: 800; }
+
       .sub { opacity:0.7; font-size:12px; padding:4px 0 0; }
+      .graph text {fill: rgba(255,255,255,0.95);
+}
+
     `;
   }
 }
@@ -592,11 +1191,11 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "andy-temperature-card",
   name: "Andy Temperature Card",
-  description: "Thermometer with locked scale + intervals (fill/gradient/outline) + per-interval scale coloring + glass + orientation + min/avg/max (REST history).",
+  description: "Thermometer with locked scale + intervals (fill/gradient/outline) + per-interval scale coloring + glass + orientation + min/avg/max (REST history) + optional history graph.",
 });
 
 /* =============================================================================
- * Editor (HTMLElement)
+ * Editor
  * ============================================================================= */
 
 const EDITOR_TAG = "andy-temperature-card-editor";
@@ -609,6 +1208,7 @@ const DEFAULTS = {
   unit: "",
   decimals: 1,
   value_position: "top_right",
+  name_position: "auto",
   value_font_size: 0,
   glass: true,
   orientation: "vertical",
@@ -616,6 +1216,26 @@ const DEFAULTS = {
   scale_color_mode: "per_interval",
   show_stats: false,
   stats_hours: 24,
+  card_scale: 1,
+  show_graph: false,
+  graph_hours: 24,
+  graph_height: 58,
+  graph_show_time: true,
+  graph_max_points: 160,
+  graph_line_width: 0.7,
+
+  extra_entity_1: "",
+  extra_icon_1: "",
+  extra_label_1: "",
+
+  extra_entity_2: "",
+  extra_icon_2: "",
+  extra_label_2: "",
+
+  extra_entity_3: "",
+  extra_icon_3: "",
+  extra_label_3: "",
+
   intervals: deepClone(DEFAULT_INTERVALS).map(normalizeInterval),
 };
 
@@ -624,10 +1244,16 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const incomingRaw = { ...DEFAULTS, ...(config || {}) };
     if ("liquid_animation" in incomingRaw) delete incomingRaw.liquid_animation;
 
-    incomingRaw.orientation = (String(incomingRaw.orientation) === "horizontal") ? "horizontal" : "vertical";
-    incomingRaw.scale_color_mode = (String(incomingRaw.scale_color_mode) === "active_interval") ? "active_interval" : "per_interval";
+    incomingRaw.orientation =
+      (String(incomingRaw.orientation) === "horizontal") ? "horizontal" : "vertical";
+    incomingRaw.scale_color_mode =
+      (String(incomingRaw.scale_color_mode) === "active_interval")
+        ? "active_interval"
+        : "per_interval";
 
-    if (!Array.isArray(incomingRaw.intervals) || incomingRaw.intervals.length === 0) incomingRaw.intervals = deepClone(DEFAULT_INTERVALS);
+    if (!Array.isArray(incomingRaw.intervals) || incomingRaw.intervals.length === 0) {
+      incomingRaw.intervals = deepClone(DEFAULT_INTERVALS);
+    }
     incomingRaw.intervals = incomingRaw.intervals.map(normalizeInterval);
 
     if (!Number.isFinite(Number(incomingRaw.min))) incomingRaw.min = -20;
@@ -640,27 +1266,29 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._built) this._sync();
+    if (this._elEntity) this._elEntity.hass = this._hass;
   }
 
   _buildOnce() {
     if (this._built) return;
     this._built = true;
-    //2026-01-03 V1.0.5 Fix color picker autoclosing
+
     this._isPickingColor = false;
     if (!this._winFocusBound) {
       this._winFocusBound = true;
       window.addEventListener("focus", () => {
-        // Native color dialog stjäl fokus; när den stängs kommer fokus tillbaka hit.
-        // Liten timeout så event-sekvensen hinner bli klar.
         setTimeout(() => { this._isPickingColor = false; }, 0);
       });
     }
 
-    const stopBubble = (e) => {
+    const stopBubbleColor = (e) => {
       if (e?.target?.matches?.('input[type="color"]')) return;
+    };
+    
+    const stopBubble = (e) => {
       e.stopPropagation();
     };
+    
 
     const root = document.createElement("div");
     root.className = "form";
@@ -688,7 +1316,51 @@ class AndyTemperatureCardEditor extends HTMLElement {
       return { wrap: ff, sw };
     };
 
+    const mkIconInput = (label, key) => {
+      if (customElements.get("ha-icon-picker")) {
+        const ic = document.createElement("ha-icon-picker");
+        ic.label = label;
+        ic.configValue = key;
+        ic.addEventListener("value-changed", (e) => this._onChange(e));
+        ic.addEventListener("click", stopBubbleColor);
+        return ic;
+      }
+      return mkText(label, key, "text", "mdi:water-percent");
+    };
+
     const mkSelect = (label, key, options) => {
+      const sel = document.createElement("ha-select");
+      sel.label = label;
+      sel.configValue = key;
+
+    options.forEach(([value, text]) => {
+        const item = document.createElement("mwc-list-item");
+        item.value = value;
+        item.innerText = text;
+        sel.appendChild(item);
+    });
+
+  
+    sel.addEventListener("click", stopBubble);
+    sel.addEventListener("opened", stopBubble);
+    sel.addEventListener("closed", stopBubble);
+    sel.addEventListener("keydown", stopBubble);
+
+    sel.addEventListener("value-changed", (e) => {
+        stopBubble(e);
+        this._onChange(e);
+    });
+
+    sel.addEventListener("selected", (e) => {
+        stopBubble(e);
+        if (sel.value) this._commit(key, sel.value);
+    });
+
+    return sel;
+    };
+
+    
+    const mkSelectold = (label, key, options) => {
       const sel = document.createElement("ha-select");
       sel.label = label;
       sel.configValue = key;
@@ -700,19 +1372,14 @@ class AndyTemperatureCardEditor extends HTMLElement {
         sel.appendChild(item);
       });
 
-      sel.addEventListener("click", stopBubble);
-      sel.addEventListener("opened", stopBubble);
-      sel.addEventListener("closed", stopBubble);
-      sel.addEventListener("keydown", stopBubble);
-
+      // Viktigt: låt events bubbla fritt, vi lyssnar bara och commit:ar
       sel.addEventListener("value-changed", (e) => {
-        e.stopPropagation();
         this._onChange(e);
       });
 
       sel.addEventListener("selected", (e) => {
-        e.stopPropagation();
-        if (sel.value) this._commit(key, sel.value);
+        const v = sel.value;
+        if (v) this._commit(key, v);
       });
 
       return sel;
@@ -726,7 +1393,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
         sel.configValue = "entity";
         sel.selector = { entity: {} };
         sel.addEventListener("value-changed", (e) => this._onChange(e));
-        sel.addEventListener("click", stopBubble);
+        sel.addEventListener("click", stopBubbleColor);
         return sel;
       }
       const ep = document.createElement("ha-entity-picker");
@@ -734,7 +1401,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
       ep.allowCustomEntity = true;
       ep.configValue = "entity";
       ep.addEventListener("value-changed", (e) => this._onChange(e));
-      ep.addEventListener("click", stopBubble);
+      ep.addEventListener("click", stopBubbleColor);
       return ep;
     };
 
@@ -762,6 +1429,12 @@ class AndyTemperatureCardEditor extends HTMLElement {
     row3.appendChild(this._elFont);
     root.appendChild(row3);
 
+    const rowScale = document.createElement("div");
+    rowScale.className = "grid2";
+    this._elCardScale = mkText("Card scale (0.2–4.0) — 1 = default", "card_scale", "number", "1");
+    rowScale.appendChild(this._elCardScale);
+    root.appendChild(rowScale);
+
     const rowVP = document.createElement("div");
     rowVP.className = "grid2";
 
@@ -773,6 +1446,14 @@ class AndyTemperatureCardEditor extends HTMLElement {
       ["inside", "Inside icon"],
     ]);
     rowVP.appendChild(this._elValuePos);
+    
+    
+    this._elNamePos = mkSelect("Name position", "name_position", [
+      ["auto", "Auto (follow value)"],
+      ["left", "Left"],
+      ["center", "Center"],
+    ]);
+    root.appendChild(this._elNamePos);
 
     const secTog = document.createElement("div");
     secTog.className = "toggles";
@@ -786,9 +1467,13 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const { wrap: swStatsWrap, sw: swStats } = mkSwitch("Show Min/Avg/Max (history)", "show_stats");
     this._swStats = swStats;
 
+    const { wrap: swGraphWrap, sw: swGraph } = mkSwitch("Show history graph", "show_graph");
+    this._swGraph = swGraph;
+
     secTog.appendChild(swGlassWrap);
     secTog.appendChild(swScaleWrap);
     secTog.appendChild(swStatsWrap);
+    secTog.appendChild(swGraphWrap);
 
     rowVP.appendChild(secTog);
     root.appendChild(rowVP);
@@ -813,10 +1498,88 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._elStatsHours = mkText("Stats lookback hours", "stats_hours", "number", "24");
     root.appendChild(this._elStatsHours);
 
-    // Intervals UI remains the same as v1.0.4 (id-based edit/delete + scale_color field)
-    // (Kept unchanged intentionally)
+    this._elGraphHours = mkText("Graph lookback hours", "graph_hours", "number", "24");
+    root.appendChild(this._elGraphHours);
 
-    // ---- intervals section (unchanged) ----
+    const { wrap: swGraphTimeWrap, sw: swGraphTime } =
+      mkSwitch("Graph: show time ticks", "graph_show_time");
+    this._swGraphTime = swGraphTime;
+    root.appendChild(swGraphTimeWrap);
+
+    // Extra values
+    const secExtra = document.createElement("div");
+    secExtra.className = "section";
+
+    const extraTitle = document.createElement("div");
+    extraTitle.className = "section-title";
+    extraTitle.innerText = "Extra values (right of icon)";
+    secExtra.appendChild(extraTitle);
+
+    const mkEntityPick = (label, key) => {
+      const hasSelector = !!customElements.get("ha-selector");
+      if (hasSelector) {
+        const sel = document.createElement("ha-selector");
+        sel.label = label;
+        sel.configValue = key;
+        sel.selector = { entity: {} };
+        sel.addEventListener("value-changed", (e) => this._onChange(e));
+        sel.addEventListener("click", stopBubbleColor);
+        return sel;
+      }
+      const ep = document.createElement("ha-entity-picker");
+      ep.label = label;
+      ep.allowCustomEntity = true;
+      ep.configValue = key;
+      ep.addEventListener("value-changed", (e) => this._onChange(e));
+      ep.addEventListener("click", stopBubbleColor);
+      return ep;
+    };
+
+    const rowE1 = document.createElement("div");
+    rowE1.className = "grid1";
+    this._elExtraEntity1 = mkEntityPick("Extra entity 1", "extra_entity_1");
+    rowE1.appendChild(this._elExtraEntity1);
+    secExtra.appendChild(rowE1);
+
+    const rowE11 = document.createElement("div");
+    rowE11.className = "grid2";
+    this._elExtraLabel1 = mkText("Label (optional)", "extra_label_1");
+    this._elExtraIcon1  = mkIconInput("Icon (optional, mdi:...)", "extra_icon_1");
+    rowE11.appendChild(this._elExtraLabel1);
+    rowE11.appendChild(this._elExtraIcon1);
+    secExtra.appendChild(rowE11);
+
+    const rowE2 = document.createElement("div");
+    rowE2.className = "grid1";
+    this._elExtraEntity2 = mkEntityPick("Extra entity 2", "extra_entity_2");
+    rowE2.appendChild(this._elExtraEntity2);
+    secExtra.appendChild(rowE2);
+
+    const rowE22 = document.createElement("div");
+    rowE22.className = "grid2";
+    this._elExtraLabel2 = mkText("Label (optional)", "extra_label_2");
+    this._elExtraIcon2  = mkIconInput("Icon (optional, mdi:...)", "extra_icon_2");
+    rowE22.appendChild(this._elExtraLabel2);
+    rowE22.appendChild(this._elExtraIcon2);
+    secExtra.appendChild(rowE22);
+
+    const rowE3 = document.createElement("div");
+    rowE3.className = "grid1";
+    this._elExtraEntity3 = mkEntityPick("Extra entity 3", "extra_entity_3");
+    rowE3.appendChild(this._elExtraEntity3);
+    secExtra.appendChild(rowE3);
+
+    const rowE33 = document.createElement("div");
+    rowE33.className = "grid2";
+    this._elExtraLabel3 = mkText("Label (optional)", "extra_label_3");
+    this._elExtraIcon3  = mkIconInput("Icon (optional, mdi:...)", "extra_icon_3");
+    rowE33.appendChild(this._elExtraLabel3);
+    rowE33.appendChild(this._elExtraIcon3);
+    secExtra.appendChild(rowE33);
+
+    root.appendChild(secExtra);
+
+    // Intervals
     const secInt = document.createElement("div");
     secInt.className = "section";
     const secTitle = document.createElement("div");
@@ -886,25 +1649,13 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this.innerHTML = "";
     this.appendChild(style);
     this.appendChild(root);
-
-    this.addEventListener("click", stopBubble);
-    this.addEventListener("mousedown", stopBubble);
-    this.addEventListener("mouseup", stopBubble);
-    this.addEventListener("pointerdown", stopBubble);
-    this.addEventListener("pointerup", stopBubble);
-    this.addEventListener("keydown", stopBubble);
   }
-
-  // ---- The rest of the editor code (interval list + draft UI + commit/onChange) is identical to v1.0.4 ----
-  // To keep this file complete and consistent, we include it verbatim below.
 
   _sync() {
     if (!this._hass || !this._config) return;
-    //2026-01-03  V1.0.5 Fix color picker autoclosing
-    // IMPORTANT: do not rebuild draft UI while native color picker is open
+
     if (this._isPickingColor) {
-      // still keep entity control updated if needed
-      if (this._elEntity) this._elEntity.hass = hass;
+      if (this._elEntity) this._elEntity.hass = this._hass;
       return;
     }
 
@@ -918,22 +1669,42 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._elMin.value = String(this._config.min ?? -20);
     this._elMax.value = String(this._config.max ?? 40);
     this._elFont.value = String(this._config.value_font_size ?? 0);
+    this._elCardScale.value = String(this._config.card_scale ?? 1);
 
     this._elValuePos.value = this._config.value_position || "top_right";
 
     this._swGlass.checked = !!this._config.glass;
     this._swScale.checked = !!this._config.show_scale;
     this._swStats.checked = !!this._config.show_stats;
+    this._swGraph.checked = !!this._config.show_graph;
 
     this._elOrientation.value = this._config.orientation || "vertical";
     this._elScaleMode.value = this._config.scale_color_mode || "per_interval";
+    this._elNamePos.value = this._config.name_position || "auto";
 
     this._elStatsHours.style.display = this._config.show_stats ? "" : "none";
     this._elStatsHours.value = String(this._config.stats_hours ?? 24);
 
+    this._elGraphHours.style.display = this._config.show_graph ? "" : "none";
+    this._elGraphHours.value = String(this._config.graph_hours ?? this._config.stats_hours ?? 24);
+
+    this._swGraphTime.checked = !!this._config.graph_show_time;
+    this._swGraphTime.parentElement.style.display = this._config.show_graph ? "" : "none";
+
     this._renderIntervals();
-    //2026-01-03  V1.0.5 Fix color picker autoclosing
     if (!this._isPickingColor) this._renderDraft();
+
+    if (this._elExtraEntity1) { this._elExtraEntity1.hass = this._hass; this._elExtraEntity1.value = this._config.extra_entity_1 || ""; }
+    if (this._elExtraLabel1) this._elExtraLabel1.value = this._config.extra_label_1 || "";
+    if (this._elExtraIcon1)  this._elExtraIcon1.value  = this._config.extra_icon_1  || "";
+
+    if (this._elExtraEntity2) { this._elExtraEntity2.hass = this._hass; this._elExtraEntity2.value = this._config.extra_entity_2 || ""; }
+    if (this._elExtraLabel2) this._elExtraLabel2.value = this._config.extra_label_2 || "";
+    if (this._elExtraIcon2)  this._elExtraIcon2.value  = this._config.extra_icon_2  || "";
+
+    if (this._elExtraEntity3) { this._elExtraEntity3.hass = this._hass; this._elExtraEntity3.value = this._config.extra_entity_3 || ""; }
+    if (this._elExtraLabel3) this._elExtraLabel3.value = this._config.extra_label_3 || "";
+    if (this._elExtraIcon3)  this._elExtraIcon3.value  = this._config.extra_icon_3  || "";
   }
 
   _renderIntervals() {
@@ -948,7 +1719,9 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
       const badgeFill = document.createElement("div");
       badgeFill.className = "badge";
-      badgeFill.style.background = it.gradient?.enabled ? `linear-gradient(${it.gradient.from}, ${it.gradient.to})` : it.color;
+      badgeFill.style.background = it.gradient?.enabled
+        ? `linear-gradient(${it.gradient.from}, ${it.gradient.to})`
+        : it.color;
 
       const badgeOutline = document.createElement("div");
       badgeOutline.className = "badge";
@@ -1019,7 +1792,6 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._draft = null;
     this._editingId = null;
     this._renderDraft(false);
-    //2026-01-03  V1.0.5 Fix color picker autoclosing
     this._isPickingColor = false;
   }
 
@@ -1091,18 +1863,15 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
       const btn = document.createElement("input");
       btn.type = "color";
-      //2026-01-03 V1.0.5 Fix color picker autoclosing
-      // --- prevent HA hass-refresh from re-rendering draft while native picker is open ---
+
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
         this._isPickingColor = true;
       });
-      // When picker closes (either user picks or cancels), focus returns to window
-      // We'll clear the flag on window focus (added once in _buildOnce)
       btn.addEventListener("change", () => {
         this._isPickingColor = false;
-      })
-      
+      });
+
       btn.className = "colorBtn";
 
       const cur = normalizeHex(getVal(), "#ffffff");
@@ -1174,33 +1943,110 @@ class AndyTemperatureCardEditor extends HTMLElement {
     }));
   }
 
-  _eventValue(ev, target) {
-    if (ev && ev.detail && typeof ev.detail.value !== "undefined") return ev.detail.value;
-    return target.value;
-  }
-
   _onChange(ev) {
-    const target = ev.target;
+    const target = ev.currentTarget || ev.target;
     const key = target.configValue || target.dataset?.configValue;
     if (!key) return;
 
+    // Switches
     if (typeof target.checked !== "undefined") {
       return this._commit(key, target.checked);
     }
 
-    let value = this._eventValue(ev, target);
-
-    if (key === "min" || key === "max" || key === "value_font_size" || key === "stats_hours") {
-      value = value === "" ? 0 : Number(value);
-      return this._commit(key, value);
+    // Numeriska fält
+    if (
+      key === "min" ||
+      key === "max" ||
+      key === "value_font_size" ||
+      key === "stats_hours" ||
+      key === "card_scale" ||
+      key === "graph_hours" ||
+      key === "graph_height" ||
+      key === "graph_max_points" ||
+      key === "graph_line_width"
+    ) {
+      let v;
+      if (ev && ev.detail && "value" in ev.detail) {
+        v = ev.detail.value;
+      } else {
+        v = target.value;
+      }
+      v = v === "" || v === null || v === undefined ? 0 : Number(v);
+      return this._commit(key, v);
     }
+
     if (key === "decimals") {
-      value = value === "" ? 1 : Number(value);
-      if (!Number.isFinite(value)) value = 1;
+      let v;
+      if (ev && ev.detail && "value" in ev.detail) {
+        v = ev.detail.value;
+      } else {
+        v = target.value;
+      }
+      v = v === "" || v === null || v === undefined ? 1 : Number(v);
+      if (!Number.isFinite(v)) v = 1;
+      return this._commit(key, v);
+    }
+
+    // Entity-fält (inkl extra_entity_1–3) – fixar X/rensning
+    if (
+      key === "entity" ||
+      key === "extra_entity_1" ||
+      key === "extra_entity_2" ||
+      key === "extra_entity_3"
+    ) {
+      let value;
+      if (ev && ev.detail && "value" in ev.detail) {
+        value = ev.detail.value;  // kan vara string, objekt, null, ""
+      } else {
+        value = target.value;
+      }
+
+      if (value && typeof value === "object") {
+        if ("value" in value && value.value && typeof value.value === "object") {
+          const inner = value.value;
+          if ("entity" in inner) value = inner.entity;
+          else if ("entity_id" in inner) value = inner.entity_id;
+          else if (Object.keys(inner).length === 0) value = "";
+        } else if ("entity" in value) {
+          value = value.entity;
+        } else if ("entity_id" in value) {
+          value = value.entity_id;
+        } else if (Object.keys(value).length === 0) {
+          value = "";
+        }
+      }
+
+      if (typeof value === "string") value = value.trim();
+      if (value === null || value === undefined) value = "";
+
+      // X tryckt → ta bort just det fältet ur config
+      if (!value) {
+        const next = { ...(this._config || DEFAULTS) };
+        delete next[key];
+
+        this._config = next;
+        this.dispatchEvent(
+          new CustomEvent("config-changed", {
+            detail: { config: next },
+            bubbles: true,
+            composed: true,
+          })
+        );
+        return;
+      }
+
       return this._commit(key, value);
     }
 
-    return this._commit(key, value);
+    // Allt annat (text / select)
+    let genericValue;
+    if (ev && ev.detail && "value" in ev.detail) {
+      genericValue = ev.detail.value;
+    } else {
+      genericValue = target.value;
+    }
+
+    return this._commit(key, genericValue);
   }
 }
 
