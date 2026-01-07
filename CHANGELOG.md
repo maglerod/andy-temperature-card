@@ -8,6 +8,7 @@
 - Added History graph feature
 - Added Time ticks below historygraph feature
 - Added 3 Extra entities for example: Humidity, preassure etc
+- Click on Main entity to get more information / history
 
 
 ## v1.0.4
