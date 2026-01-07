@@ -1,7 +1,10 @@
 # andy-temperature-card
+[![Buy Me a Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=☕&slug=andybonde&button_colour=FFDD00&font_colour=000000&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/andybonde)
+
 Andy Temperature Card is a sleek Lovelace custom card that visualizes a numeric sensor value as a modern thermometer.
 It supports configurable min/max scaling, optional tick marks, optional Min/Avg/Max statistics (via Home Assistant history), and powerful color styling through value intervals.
 
+![Preview 1_0_5](images/temperature_card_new_1.png)
 ![Preview Cold](images/temperature_card_1.png)
 ![Preview Hot](images/temperature_card_2.png)
 ![Preview VisualEditor](images/temperature_card_edit.png)
@@ -21,6 +24,9 @@ Key features:
 - Optional scale ticks (locked/consistent geometry)
 - Optional Min/Avg/Max statistics (lookback hours configurable)
 - Built-in visual editor UI (no YAML required, but supported)
+- Support for 3 extra Entity information
+- Click on entity support
+- Show Graph
 
 Notes:
 The stats feature uses the REST history endpoint via hass.callApi("GET", "history/period/...").
