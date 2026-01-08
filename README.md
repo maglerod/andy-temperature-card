@@ -3,9 +3,11 @@ Andy Temperature Card is a sleek Lovelace custom card that visualizes a numeric 
 It supports configurable min/max scaling, optional tick marks, optional Min/Avg/Max statistics (via Home Assistant history), and powerful color styling through value intervals.
 
 ![Preview 1_0_5](images/temperature_card_new_1.png)
-![Preview Cold](images/temperature_card_1.png)
-![Preview Hot](images/temperature_card_2.png)
-![Preview VisualEditor](images/temperature_card_edit.png)
+![Preview 1_0_5_2](images/temperature_card_new_6.png)
+![Preview 1_0_5_3](images/temperature_card_new_2.png)
+![Preview 1_0_5_4](images/temperature_card_new_3.png)
+![Preview 1_0_5_5](images/temperature_card_new_4.png)
+![Preview 1_0_5_6](images/temperature_card_new_5.png)
 
 > **Recommended installation method:** HACS  
 > Manual installation is supported but not recommended unless HACS is unavailable
