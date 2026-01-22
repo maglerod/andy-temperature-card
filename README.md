@@ -146,7 +146,5 @@ I love creating clean, useful UI components and sharing them for free with the c
 If you enjoy my work or use any of my cards in your setup, your support means a lot and helps me keep experimenting, improving and maintaining everything.
 
 <a href="https://www.buymeacoffee.com/AndyBonde" target="_blank">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" 
-       alt="Buy Me A Coffee" 
-       style="height: 60px; width: 217px;">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" width="160">
 </a>
