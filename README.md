@@ -141,5 +141,12 @@ type: custom:andy-temperature-card
 ```
 
 ## ☕ Support the project 
-[![Buy Me a Coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=☕&slug=andybonde&button_colour=FFDD00&font_colour=000000&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/andybonde)
+I’m a Home Automation enthusiast who spends way too many late nights building custom cards, dashboards and small tools for Home Assistant.
+I love creating clean, useful UI components and sharing them for free with the community, and I try to help others whenever I can with ideas, code and support.
+If you enjoy my work or use any of my cards in your setup, your support means a lot and helps me keep experimenting, improving and maintaining everything.
 
+<a href="https://www.buymeacoffee.com/AndyBonde" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" 
+       alt="Buy Me A Coffee" 
+       style="height: 60px; width: 217px;">
+</a>
