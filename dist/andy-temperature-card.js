@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v1.0.5
+ * v1.0.6
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -14,6 +14,15 @@
  * - Stats uses REST history endpoint via hass.callApi("GET", "history/period/...")
  *
  * Install: Se README.md in GITHUB
+ *
+ * Changelog 1.0.6 - 2026-02-15
+ * - Added NEON effect on interval level, to make the symbol "glow"
+ * - Added Inline color on interval level, to make it possible to change the color of the liquid border
+ * - Added scale markers on the scale for current, max & min
+ * - Fixed card clipping when changing the scale factor
+ * - Added Value position X, Y Offset, to make it possible to tweak the position 
+ * - Added card height value, make it possible to change the automatic calculated value
+ * - Added some effects on the Graph makes it smoother and cleaner.
  *
  * Changelog 1.0.5 - 2026-01-07
  * - Added Name position
@@ -33,7 +42,10 @@
  *
  */
 
-console.info("Andy Temperature Card loaded: v1.0.5");
+const CARD_VERSION = "1.0.6";
+console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
+const CARD_TAG = "andy-temperature-card";
+const EDITOR_TAG = "andy-temperature-card-editor";
 
 const LitElement =
   window.LitElement || Object.getPrototypeOf(customElements.get("ha-panel-lovelace"));
@@ -43,11 +55,12 @@ const svg  = window.svg  || LitElement.prototype.svg || html;
 
 
 const DEFAULT_INTERVALS = [
-  { id: "it0", to: 0,   color: "#2b6cff", outline: "#ffffff", scale_color: "#2b6cff", gradient: { enabled: false, from: "#2b6cff", to: "#2b6cff" } },
-  { id: "it1", to: 10,  color: "#39c0ff", outline: "#ffffff", scale_color: "#39c0ff", gradient: { enabled: false, from: "#39c0ff", to: "#39c0ff" } },
-  { id: "it2", to: 20,  color: "#22c55e", outline: "#ffffff", scale_color: "#22c55e", gradient: { enabled: false, from: "#22c55e", to: "#22c55e" } },
-  { id: "it3", to: 30,  color: "#f59e0b", outline: "#ffffff", scale_color: "#f59e0b", gradient: { enabled: false, from: "#f59e0b", to: "#f59e0b" } },
-  { id: "it4", to: 100, color: "#ef4444", outline: "#ffffff", scale_color: "#ef4444", gradient: { enabled: false, from: "#ef4444", to: "#ef4444" } },
+  { id: "it0", to: 0,   color: "#2b6cff", outline: "#ffffff",
+      inline: "#ffffff", scale_color: "#2b6cff", neon: 0, inline: "#ffffff", gradient: { enabled: false, from: "#2b6cff", to: "#2b6cff" } },
+  { id: "it1", to: 10,  color: "#39c0ff", outline: "#ffffff", scale_color: "#39c0ff", neon: 0, inline: "#ffffff", gradient: { enabled: false, from: "#39c0ff", to: "#39c0ff" } },
+  { id: "it2", to: 20,  color: "#22c55e", outline: "#ffffff", scale_color: "#22c55e", neon: 0, inline: "#ffffff", gradient: { enabled: false, from: "#22c55e", to: "#22c55e" } },
+  { id: "it3", to: 30,  color: "#f59e0b", outline: "#ffffff", scale_color: "#f59e0b", neon: 0, inline: "#ffffff", gradient: { enabled: false, from: "#f59e0b", to: "#f59e0b" } },
+  { id: "it4", to: 100, color: "#ef4444", outline: "#ffffff", scale_color: "#ef4444", neon: 0, inline: "#ffffff", gradient: { enabled: false, from: "#ef4444", to: "#ef4444" } },
 ];
 
 function deepClone(x) { return JSON.parse(JSON.stringify(x ?? {})); }
@@ -71,7 +84,12 @@ function normalizeInterval(it) {
   out.color = normalizeHex(out.color, "#22c55e");
   out.outline = normalizeHex(out.outline, "#ffffff");
   out.scale_color = normalizeHex(out.scale_color, out.color);
+  out.inline = normalizeHex(out.inline, out.outline);
 
+  out.neon = Number(out.neon ?? 0);
+  if (!Number.isFinite(out.neon)) out.neon = 0;
+  out.neon = Math.max(0, out.neon);
+  out.neon = Math.round(out.neon * 10) / 10;
   const g0 = out.gradient || {};
   out.gradient = { ...(g0 || {}) };
   out.gradient.enabled = !!out.gradient.enabled;
@@ -125,6 +143,26 @@ function downsampleSeries(series, maxPoints) {
     if (c) out.push({ t: sumT / c, v: sumV / c });
   }
   return out;
+}// Build a smooth SVG path (Catmull-Rom -> cubic Bezier) from [{x,y}, ...]
+function buildSmoothPath(pts) {
+  const p = pts || [];
+  if (p.length < 2) return "";
+  const d = [];
+  d.push(`M ${p[0].x} ${p[0].y}`);
+  for (let i = 0; i < p.length - 1; i++) {
+    const p0 = p[i - 1] || p[i];
+    const p1 = p[i];
+    const p2 = p[i + 1];
+    const p3 = p[i + 2] || p[i + 1];
+
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+
+    d.push(`C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`);
+  }
+  return d.join(" ");
 }
 
 class AndyTemperatureCard extends LitElement {
@@ -153,11 +191,15 @@ class AndyTemperatureCard extends LitElement {
       card_scale: 1,
       value_position: "top_right",
       value_font_size: 0,
+      value_position_offset_x: 0,
+      value_position_offset_y: 0,
       name_position: "auto",
       glass: true,
       orientation: "vertical",
       show_scale: false,
-      scale_color_mode: "per_interval",
+              scale_markers: false,
+  scale_markers: false,
+scale_color_mode: "per_interval",
       show_stats: false,
       stats_hours: 24,
       show_graph: false,
@@ -201,7 +243,7 @@ class AndyTemperatureCard extends LitElement {
 
     let cs = Number(this._config.card_scale ?? 1);
     if (!Number.isFinite(cs) || cs <= 0) cs = 1;
-    this._config.card_scale = Math.max(0.2, Math.min(2.0, cs));
+    this._config.card_scale = Math.max(0.2, Math.min(4.0, cs));
 
     // graph clamps
     let gh = Number(this._config.graph_hours ?? this._config.stats_hours ?? 24);
@@ -233,7 +275,7 @@ class AndyTemperatureCard extends LitElement {
     this._series = null;
   }
 
-  static getConfigElement() { return document.createElement("andy-temperature-card-editor"); }
+  static getConfigElement() { return document.createElement(EDITOR_TAG); }
 
   _getStateValue(entityId) {
     if (!entityId) return null;
@@ -343,7 +385,7 @@ class AndyTemperatureCard extends LitElement {
   async _maybeUpdateStats() {
     if (!this.hass || !this._config) return;
 
-    const needStats = !!this._config.show_stats;
+            const needStats = !!this._config.show_stats || (!!this._config.show_scale && !!this._config.scale_markers);
     const needGraph = !!this._config.show_graph;
     if (!needStats && !needGraph) return;
 
@@ -535,6 +577,44 @@ class AndyTemperatureCard extends LitElement {
     if (changedProps.has("hass") || changedProps.has("_config") || changedProps.has("_stats")) {
       this._drawScaleDom();
     }
+      this._syncCardHeight();
+  }
+
+
+  _syncCardHeight() {
+    try {
+      const cfg = this._config || {};
+      const card = this.shadowRoot?.querySelector("ha-card");
+      const wrap = this.shadowRoot?.querySelector(".wrap");
+      if (!card || !wrap) return;
+
+      const manual = Number(cfg.card_height ?? 0);
+      if (Number.isFinite(manual) && manual > 0) {
+        card.style.height = `${manual}px`;
+        card.style.minHeight = `${manual}px`;
+        return;
+      } else {
+        card.style.height = "";
+        card.style.minHeight = "";
+      }
+
+      const scale = Number(cfg.card_scale ?? 1);
+      const auto = (cfg.auto_card_height !== undefined) ? !!cfg.auto_card_height : (scale !== 1);
+
+      if (!auto) return;
+
+      // Reserve correct height even when inner content is scaled (zoom/transform can fool HA layout).
+      requestAnimationFrame(() => {
+        try {
+          const rect = wrap.getBoundingClientRect();
+          const h = Math.ceil(rect.height);
+          if (h > 0) {
+            // Use min-height so the card can still grow if content changes.
+            card.style.minHeight = `${h}px`;
+          }
+        } catch (_) {}
+      });
+    } catch (_) {}
   }
 
   _drawScaleDom() {
@@ -633,6 +713,47 @@ class AndyTemperatureCard extends LitElement {
           layer.appendChild(text);
         }
       }
+    
+      // Optional scale markers (clean, subtle arrows on the left)
+      const showMarkers = !!this._config?.scale_markers;
+      if (showMarkers) {
+        const arrowTipX = xMinor1 + 1; // point towards tick
+        const arrowBaseX = Math.max(0, arrowTipX - 7);
+        const arrowH = 6; // small + discreet
+
+        const colorForValue = (val) => {
+          const it = normalizeInterval(this._findIntervalForValue(val));
+          return normalizeHex(it?.color, "#ffffff");
+        };
+
+        const mkArrow = (val, color, y) => {
+          const p = document.createElementNS(NS, "path");
+          // small triangle pointing right
+          const d = `M ${arrowBaseX} ${y - arrowH/2} L ${arrowBaseX} ${y + arrowH/2} L ${arrowTipX} ${y} Z`;
+          p.setAttribute("d", d);
+          p.setAttribute("fill", color);
+          p.setAttribute("fill-opacity", "0.95");
+          return p;
+        };
+
+        // Current
+        if (currentValue != null && Number.isFinite(currentValue)) {
+          const yc = posY(currentValue);
+          layer.appendChild(mkArrow(currentValue, colorForValue(currentValue), yc));
+        }
+
+        // Min / Max from stats (if available)
+        const st = this._stats;
+        if (st && st.min != null && Number.isFinite(st.min)) {
+          const yMin = posY(st.min);
+          layer.appendChild(mkArrow(st.min, colorForValue(st.min), yMin));
+        }
+        if (st && st.max != null && Number.isFinite(st.max)) {
+          const yMax = posY(st.max);
+          layer.appendChild(mkArrow(st.max, colorForValue(st.max), yMax));
+        }
+      }
+
     } catch (e) {
       console.warn("Andy Temperature Card v1.0.5.8: scale DOM draw failed", e);
     }
@@ -684,7 +805,18 @@ class AndyTemperatureCard extends LitElement {
       : "";
 
     const interval = normalizeInterval(this._findIntervalForValue(value));
-    const glassOn = this._config.glass !== false;
+        const neon = (() => {
+      const n = Number(interval.neon ?? 0);
+      const v = Number.isFinite(n) ? n : 0;
+      return Math.max(0, Math.round(v * 10) / 10);
+    })();
+        const neonColor = normalizeHex(interval.outline, "#ffffff"); // neon follows outline
+    const neonOutline = normalizeHex(interval.outline, "#ffffff");
+
+    const vOffX = Number(this._config.value_position_offset_x ?? 0);
+    const vOffY = Number(this._config.value_position_offset_y ?? 0);
+    const vOffXn = Number.isFinite(vOffX) ? vOffX : 0;
+    const vOffYn = Number.isFinite(vOffY) ? vOffY : 0;
 
     const showStats = !!this._config.show_stats;
     const stats = this._stats || { min: null, avg: null, max: null, samples: 0 };
@@ -692,7 +824,7 @@ class AndyTemperatureCard extends LitElement {
     const isHorizontal = (this._config.orientation === "horizontal");
 
     const cardScale = Number(this._config.card_scale ?? 1);
-    const scaleVarStyle = `--asc-scale:${cardScale};`;
+    const scaleVarStyle = `--asc-scale:${cardScale};--asc-neon:${neon};--asc-neon-color:${neonColor};--asc-neon-outline:${neonColor};--asc-val-off-x:${vOffXn}px;--asc-val-off-y:${vOffYn}px;`;
 
     return html`
       <ha-card @click=${this._openMoreInfo} style="cursor:pointer;">
@@ -718,7 +850,7 @@ class AndyTemperatureCard extends LitElement {
 
             <div class="iconRow ${this._hasExtras() ? "hasExtras" : ""}">
               <div class="iconWrap">
-                ${this._thermoSvg({ value, interval, glassOn })}
+                ${this._thermoSvg({ value, interval })}
                 ${showInsideValue ? html`
                   <div class="value inside" style="${valueStyle}">
                     ${shown}${unit ? html`<span class="unit">${unit}</span>` : ""}
@@ -822,7 +954,12 @@ _renderGraph() {
       return padT + (1 - t) * innerH;
     };
 
-    const pointsAttr = s.map((p) => `${xFor(p.t)},${yFor(p.v)}`).join(" ");
+    const pts = s.map((p) => ({ x: xFor(p.t), y: yFor(p.v) }));
+const pathD = buildSmoothPath(pts);
+const baseY = padT + innerH;
+const firstX = pts[0].x;
+const lastX = pts[pts.length - 1].x;
+const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
 
     const last = s[s.length - 1];
     const it = normalizeInterval(this._findIntervalForValue(last.v));
@@ -860,15 +997,12 @@ _renderGraph() {
             aria-label="History graph"
           >
             <defs>
-              <filter id="gShadowSimple" x="-20%" y="-40%" width="140%" height="180%">
-                <feDropShadow
-                  dx="0"
-                  dy="2"
-                  stdDeviation="2"
-                  flood-color="rgba(0,0,0,0.30)"
-                />
-              </filter>
+              <linearGradient id="gFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="${c}" stop-opacity="0.25" />
+                <stop offset="100%" stop-color="${c}" stop-opacity="0" />
+              </linearGradient>
             </defs>
+        <g class="symbol">
 
             <rect
               x="0"
@@ -881,25 +1015,30 @@ _renderGraph() {
               stroke="none"
             />
 
-            <!-- Själva linjen -->
-            <g filter="url(#gShadowSimple)">
-              <polyline
-                fill="none"
-                stroke="${c}"
-                stroke-width="${strokeW}"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                points="${pointsAttr}"
-              />
-            </g>
+            <!-- Area (HA-like) -->
+            <path
+              d="${areaD}"
+              fill="url(#gFill)"
+              stroke="none"
+            />
 
-            <!-- Marker på sista värdet -->
+            <!-- Smooth line -->
+            <path
+              d="${pathD}"
+              fill="none"
+              stroke="${c}"
+              stroke-width="${strokeW}"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+
+            <!-- Small dot on last value -->
             <circle
-              cx="${xFor(last.t)}"
+              cx="${lastX}"
               cy="${yFor(last.v)}"
-              r="3.4"
+              r="2.6"
               fill="${c}"
-              stroke="rgba(0,0,0,0.25)"
+              stroke="rgba(0,0,0,0.18)"
               stroke-width="1"
             />
           </svg>
@@ -907,8 +1046,7 @@ _renderGraph() {
           ${showTimeTicks && ticks.length
             ? html`
                 <div class="graphTicks">
-                  <div class="graphTicksLine"></div>
-                  <div class="graphTicksLabels">
+                                    <div class="graphTicksLabels">
                     ${ticks.map((ti) => html`<span>${ti.label}</span>`)}
                   </div>
                 </div>
@@ -918,7 +1056,7 @@ _renderGraph() {
       </div>
     `;
   } catch (e) {
-    console.error("Andy Temp v1.0.5.12 _renderGraph error", e);
+    console.error("Andy Temp v1.1.5 _renderGraph error", e);
     return html`
       <div class="graphWrap" style="height:${this._config.graph_height}px;">
         <div class="graphEmpty">Graph error</div>
@@ -934,12 +1072,19 @@ _renderGraph() {
 
 
   _thermoSvg(opts) {
-    const { value, interval, glassOn } = opts;
+    const { value, interval } = opts;
 
     const it = normalizeInterval(interval);
+    const neon = (() => {
+      const n = Number(it.neon ?? 0);
+      const v = Number.isFinite(n) ? n : 0;
+      return Math.max(0, Math.round(v * 10) / 10);
+    })();
+    const neonOutline = normalizeHex(it.outline, "#ffffff");
     const useGradient = !!it.gradient?.enabled;
     const cSolid = normalizeHex(it.color, "#22c55e");
     const outline = normalizeHex(it.outline, "#ffffff");
+    const inline = normalizeHex(it.inline, outline);
     const gFrom = normalizeHex(it.gradient?.from, cSolid);
     const gTo = normalizeHex(it.gradient?.to, gFrom);
 
@@ -958,11 +1103,14 @@ _renderGraph() {
     let yTop = SCALE_TOP + (1 - pScaled) * (SCALE_BOTTOM - SCALE_TOP);
     yTop = Math.max(0, Math.min(220, yTop));
 
-    const outerFill = glassOn ? "rgba(255,255,255,0.13)" : "rgba(255,255,255,0.06)";
-    const tubeBg = glassOn ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.03)";
+    const outerFill = "rgba(255,255,255,0.06)";
+    const tubeBg = "rgba(255,255,255,0.03)";
+
+    const thermoPad = Math.min(28, (neon || 0) * 10);
+    const thermoVB = `${-thermoPad} ${-thermoPad} ${220 + thermoPad * 2} ${230 + thermoPad * 2}`;
 
     return html`
-      <svg class="thermo" viewBox="0 0 220 230" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Temperature">
+      <svg class="thermo" style="overflow: visible;" viewBox="${thermoVB}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Temperature">
         <defs>
           <linearGradient id="liquidGrad" x1="0" x2="0" y1="1" y2="0">
             <stop offset="0%" stop-color="${gFrom}"></stop>
@@ -997,6 +1145,31 @@ _renderGraph() {
         </defs>
 
         <g transform="translate(-50,0)">
+          <path class="neonHalo3"
+            d="M160 10 C144 10 131 23 131 39 V135 C121 147 116 157 116 170 C116 200 140 220 160 220 C180 220 204 200 204 170 C204 157 199 147 189 135 V39 C189 23 176 10 160 10 Z"
+            fill="none"
+            stroke="${neonOutline}"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="${3.2 + (neon || 0) * 10}"
+            stroke-opacity="${(neon || 0) > 0 ? 0.06 : 0}"/>
+          <path class="neonHalo2"
+            d="M160 10 C144 10 131 23 131 39 V135 C121 147 116 157 116 170 C116 200 140 220 160 220 C180 220 204 200 204 170 C204 157 199 147 189 135 V39 C189 23 176 10 160 10 Z"
+            fill="none"
+            stroke="${neonOutline}"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="${3.2 + (neon || 0) * 6}"
+            stroke-opacity="${(neon || 0) > 0 ? 0.10 : 0}"/>
+          <path class="neonHalo1"
+            d="M160 10 C144 10 131 23 131 39 V135 C121 147 116 157 116 170 C116 200 140 220 160 220 C180 220 204 200 204 170 C204 157 199 147 189 135 V39 C189 23 176 10 160 10 Z"
+            fill="none"
+            stroke="${neonOutline}"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="${3.2 + (neon || 0) * 3}"
+            stroke-opacity="${(neon || 0) > 0 ? 0.18 : 0}"/>
+
           <path class="outer"
             d="M160 10 C144 10 131 23 131 39 V135 C121 147 116 157 116 170 C116 200 140 220 160 220 C180 220 204 200 204 170 C204 157 199 147 189 135 V39 C189 23 176 10 160 10 Z"
             fill="${outerFill}"
@@ -1005,31 +1178,28 @@ _renderGraph() {
             opacity="0.95"
             filter="url(#shadow)"/>
 
+
           <g clip-path="url(#tubeClip)">
             <rect x="120" y="0" width="100" height="220" fill="${tubeBg}"></rect>
 
             <rect class="liquid"
               x="120" y="${yTop}" width="100" height="${220 - yTop}"
-              fill="${useGradient ? "url(#liquidGrad)" : cSolid}" opacity="0.98"></rect>
+              fill="${useGradient ? "url(#liquidGrad)" : cSolid}"
+              opacity="0.98"></rect>
 
-            ${glassOn ? html`
-              <rect x="120" y="0" width="100" height="220" fill="url(#glassSheen)" opacity="0.95"></rect>
-              <rect x="118" y="-10" width="120" height="250" fill="url(#glassBand)" opacity="0.78" transform="rotate(-12 160 110)"></rect>
-            ` : ""}
+            
           </g>
-
-          ${glassOn ? html`
-            <path class="glass1"
-              d="M146 26 C140 31 138 36 138 45 V128 C138 140 130 147 130 168 C130 180 140 194 150 198"
-              fill="none" stroke="rgba(255,255,255,0.94)" stroke-width="14" stroke-linecap="round" opacity="0.98" filter="url(#specBlur)" />
-            <path class="glass2"
-              d="M154 22 C148 30 146 34 146 44 V120"
-              fill="none" stroke="rgba(255,255,255,0.98)" stroke-width="5.0" stroke-linecap="round" opacity="0.98"/>
-          ` : ""}
-
-          <path
+          <path class="tubeBorder"
             d="M160 18 C149 18 140 27 140 38 V138 C131 145 126 156 126 168 C126 191 145 208 160 208 C175 208 194 191 194 168 C194 156 189 145 180 138 V38 C180 27 171 18 160 18 Z"
-            fill="none" stroke="rgba(255,255,255,0.30)" stroke-width="2"/>
+            fill="none"
+            stroke="${inline}"
+            stroke-width="2.1"
+            stroke-linejoin="round"
+            stroke-linecap="round"
+            opacity="1"/>
+
+        </g>
+
         </g>
 
         <g class="scale-layer" transform="translate(-50,0)" style="pointer-events:none;" shape-rendering="crispEdges"></g>
@@ -1040,8 +1210,10 @@ _renderGraph() {
   static get styles() {
     return css`
       :host { display:block; }
-      ha-card { border-radius: 18px; overflow: hidden; }
-      .wrap { padding: 16px; }
+      ha-card { overflow: hidden;
+        border-radius: 18px; }
+
+      .wrap { overflow: visible; padding: 16px; }
 
       .wrap.orient-horizontal {
         display:flex;
@@ -1051,11 +1223,12 @@ _renderGraph() {
       }
 
       .wrap.orient-horizontal .rotator {
-        transform: rotate(90deg) scale(var(--asc-scale, 1));
+        transform: rotate(90deg);
+        zoom: var(--asc-scale, 1);
         transform-origin: center;
       }
       .wrap.orient-vertical .rotator {
-        transform: scale(var(--asc-scale, 1));
+        zoom: var(--asc-scale, 1);
         transform-origin: top center;
       }
 
@@ -1063,17 +1236,30 @@ _renderGraph() {
       .header.top_center { justify-content:center; text-align:center; flex-direction:column; align-items:center; }
 
       .title { font-size: 14px; opacity: 0.9; letter-spacing: 0.2px; }
-      .value { font-weight: 850; letter-spacing: 0.2px; font-size: clamp(14px, 4vw, 22px); line-height: 1.1; }
+      .value { font-weight: 850; letter-spacing: 0.2px; font-size: clamp(14px, 4vw, 22px); line-height: 1.1; position: relative; left: var(--asc-val-off-x, 0px); top: var(--asc-val-off-y, 0px); }
       .unit { font-size: 12px; opacity: 0.75; margin-left: 4px; font-weight: 700; }
 
       .iconRow { display:flex; justify-content:center; padding-top: 6px; align-items:center; }
       .iconRow.hasExtras { gap: 0px; align-items: flex-start;}
-      .iconWrap { position: relative; display:flex; justify-content:center; align-items:center; }
+      .iconWrap { position: relative; overflow: visible; display:flex; justify-content:center; align-items:center; }
 
-      .thermo { width: clamp(210px, 62vw, 260px); height: clamp(150px, 34vw, 182px); display:block; }
+      .thermo { width: clamp(210px, 62vw, 260px); height: clamp(150px, 34vw, 182px); display:block; overflow: visible; }
+
+      /* Neon glow (per active interval) */
+      .thermo { filter: none; }
+      .thermo .symbol {
+        filter:
+          drop-shadow(0 0 calc(var(--asc-neon, 0) * 1.5px) var(--asc-neon-color, rgba(255,255,255,0)))
+          drop-shadow(0 0 calc(var(--asc-neon, 0) * 4px) var(--asc-neon-color, rgba(255,255,255,0)));
+      }
+      .thermo .outer {
+        filter:
+          drop-shadow(0 0 calc(var(--asc-neon, 0) * 2px) var(--asc-neon-outline, rgba(255,255,255,0)))
+          drop-shadow(0 0 calc(var(--asc-neon, 0) * 6px) var(--asc-neon-color, rgba(255,255,255,0)));
+      }
 
       .value.inside {
-        position:absolute; bottom:25px; left:50%; transform:translateX(-50%);
+        position:absolute; bottom: calc(25px + var(--asc-val-off-y, 0px)); left: calc(50% + var(--asc-val-off-x, 0px)); transform:translateX(-50%);
         background: transparent;
         border: none; 
         padding: 6px 10px; border-radius: 999px;
@@ -1119,15 +1305,12 @@ _renderGraph() {
       }
 
       .graphTicks {
-        margin-top: 4px;
-        font-size: 10px;
-        font-weight: 700;
-        opacity: 0.9;
-      }
-
-      .graphTicksLine {
-        border-top: 1px solid rgba(255,255,255,0.35);
-        margin-bottom: 2px;
+        margin-top: 0px;
+        padding-top: 0px;
+        font-size: 9px;
+        font-weight: 600;
+        line-height: 1;
+        opacity: 0.85;
       }
 
       .graphTicksLabels {
@@ -1183,13 +1366,13 @@ _renderGraph() {
   }
 }
 
-if (!customElements.get("andy-temperature-card")) {
-  customElements.define("andy-temperature-card", AndyTemperatureCard);
+if (!customElements.get(CARD_TAG)) {
+  customElements.define(CARD_TAG, AndyTemperatureCard);
 }
 
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: "andy-temperature-card",
+  type: CARD_TAG,
   name: "Andy Temperature Card",
   description: "Thermometer with locked scale + intervals (fill/gradient/outline) + per-interval scale coloring + glass + orientation + min/avg/max (REST history) + optional history graph.",
 });
@@ -1198,9 +1381,12 @@ window.customCards.push({
  * Editor
  * ============================================================================= */
 
-const EDITOR_TAG = "andy-temperature-card-editor";
 
 const DEFAULTS = {
+  // Layout sizing
+  auto_card_height: true, // auto-reserve correct height (helps when card_scale != 1)
+  card_height: 0, // px; 0 = auto
+
   name: "Temperature",
   entity: "",
   min: -20,
@@ -1213,6 +1399,7 @@ const DEFAULTS = {
   glass: true,
   orientation: "vertical",
   show_scale: false,
+  scale_markers: false,
   scale_color_mode: "per_interval",
   show_stats: false,
   stats_hours: 24,
@@ -1290,7 +1477,36 @@ class AndyTemperatureCardEditor extends HTMLElement {
     };
     
 
+    const wrap = document.createElement("div");
+
+    
+
+    wrap.className = "editorWrap";
+
+
+    
+
+    const topTitle = document.createElement("div");
+
+    
+
+    topTitle.className = "editorTopTitle";
+
+    
+
+    topTitle.textContent = `Andy Temperature Card Single Development v${CARD_VERSION}`;
+
+    
+
+    wrap.appendChild(topTitle);
+
+
+    
+
     const root = document.createElement("div");
+
+    
+
     root.className = "form";
 
     const mkText = (label, key, type = "text", placeholder = "") => {
@@ -1432,8 +1648,25 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const rowScale = document.createElement("div");
     rowScale.className = "grid2";
     this._elCardScale = mkText("Card scale (0.2–4.0) — 1 = default", "card_scale", "number", "1");
+    this._elCardScale.min = "0.2";
+    this._elCardScale.max = "4.0";
+    this._elCardScale.step = "0.1";
     rowScale.appendChild(this._elCardScale);
     root.appendChild(rowScale);
+
+    const rowHeight = document.createElement("div");
+    rowHeight.className = "grid2";
+    this._elAutoHeight = mkSelect("Auto height", "auto_card_height", [
+      ["true", "On"],
+      ["false", "Off"],
+    ]);
+    this._elCardHeight = mkText("Card height (px) — 0 = auto", "card_height", "number", "0");
+    this._elCardHeight.min = "0";
+    this._elCardHeight.step = "1";
+    rowHeight.appendChild(this._elAutoHeight);
+    rowHeight.appendChild(this._elCardHeight);
+    root.appendChild(rowHeight);
+
 
     const rowVP = document.createElement("div");
     rowVP.className = "grid2";
@@ -1446,8 +1679,17 @@ class AndyTemperatureCardEditor extends HTMLElement {
       ["inside", "Inside icon"],
     ]);
     rowVP.appendChild(this._elValuePos);
-    
-    
+
+    const rowVPOff = document.createElement("div");
+    rowVPOff.className = "grid2";
+    this._elValueOffX = mkText("Offset X (px)", "value_position_offset_x", "number", "0");
+    this._elValueOffY = mkText("Offset Y (px)", "value_position_offset_y", "number", "0");
+    this._elValueOffX.step = "0.1";
+    this._elValueOffY.step = "0.1";
+    rowVPOff.appendChild(this._elValueOffX);
+    rowVPOff.appendChild(this._elValueOffY);
+    rowVP.appendChild(rowVPOff);
+
     this._elNamePos = mkSelect("Name position", "name_position", [
       ["auto", "Auto (follow value)"],
       ["left", "Left"],
@@ -1458,20 +1700,20 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const secTog = document.createElement("div");
     secTog.className = "toggles";
 
-    const { wrap: swGlassWrap, sw: swGlass } = mkSwitch("Glass effect", "glass");
-    this._swGlass = swGlass;
-
     const { wrap: swScaleWrap, sw: swScale } = mkSwitch("Show scale (ticks)", "show_scale");
     this._swScale = swScale;
+
+
+    const { wrap: swMarkersWrap, sw: swMarkers } = mkSwitch("Scale markers (Min/Max/Current)", "scale_markers");
+    this._swScaleMarkers = swMarkers;
 
     const { wrap: swStatsWrap, sw: swStats } = mkSwitch("Show Min/Avg/Max (history)", "show_stats");
     this._swStats = swStats;
 
     const { wrap: swGraphWrap, sw: swGraph } = mkSwitch("Show history graph", "show_graph");
     this._swGraph = swGraph;
-
-    secTog.appendChild(swGlassWrap);
     secTog.appendChild(swScaleWrap);
+    secTog.appendChild(swMarkersWrap);
     secTog.appendChild(swStatsWrap);
     secTog.appendChild(swGraphWrap);
 
@@ -1590,7 +1832,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const head = document.createElement("div");
     head.className = "section-head";
     const btnAdd = document.createElement("mwc-button");
-    btnAdd.setAttribute("outlined", "");
+    btnAdd.setAttribute("raised", "");
     btnAdd.innerText = "+ Add";
     btnAdd.addEventListener("click", (e) => { e.stopPropagation(); this._startAdd(); });
     head.appendChild(btnAdd);
@@ -1609,6 +1851,8 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const style = document.createElement("style");
     style.textContent = `
       .form { display:flex; flex-direction:column; gap:12px; padding:8px 0; overflow: visible; }
+      mwc-button { --mdc-theme-primary: var(--primary-color); --mdc-theme-on-primary: #fff; }
+      mwc-button.danger { --mdc-theme-primary: var(--error-color); --mdc-theme-on-primary: #fff; }
       .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
       .grid3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; }
       .toggles { display:flex; flex-direction:column; gap:8px; justify-content:center; }
@@ -1644,11 +1888,55 @@ class AndyTemperatureCardEditor extends HTMLElement {
         background: transparent;
         cursor: pointer;
       }
-    `;
+    
+      .editorWrap { display:flex; flex-direction:column; gap:14px; overflow: visible; }
+      .editorTopTitle{
+        display:block;
+        padding:10px 14px;
+        border-radius:12px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: rgba(0,0,0,0.22);
+        font-weight: 800;
+        letter-spacing: .2px;
+      }
+
+      .badgeSupport{
+        border-radius:16px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: rgba(0,0,0,0.18);
+        padding: 14px;
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+      }
+      .badgeSupportTitle{ font-weight: 800; }
+      .badgeSupportText{ font-size: 13px; opacity: .9; line-height: 1.35; }
+      .badgeSupportActions{ display:flex; }
+      .badgeSupportImgLink img{ border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); }
+`;
 
     this.innerHTML = "";
     this.appendChild(style);
-    this.appendChild(root);
+
+    // Support the project (editor footer)
+    const support = document.createElement("div");
+    support.className = "badgeSupport";
+    support.innerHTML = `
+      <div class="badgeSupportTitle">☕ Support the project</div>
+      <div class="badgeSupportText">
+        I’m a Home Automation enthusiast who spends late nights building custom cards and tools for Home Assistant.
+        If you enjoy my work or use any of my cards, your support helps me keep improving and maintaining everything.
+      </div>
+      <div class="badgeSupportActions">
+        <a class="badgeSupportImgLink" href="https://www.buymeacoffee.com/AndyBonde" target="_blank" rel="noopener noreferrer" aria-label="Buy me a coffee">
+          <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" width="140" alt="Buy me a coffee">
+        </a>
+      </div>
+    `;
+    wrap.appendChild(support);
+    wrap.appendChild(root);
+
+    this.appendChild(wrap);
   }
 
   _sync() {
@@ -1670,11 +1958,14 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._elMax.value = String(this._config.max ?? 40);
     this._elFont.value = String(this._config.value_font_size ?? 0);
     this._elCardScale.value = String(this._config.card_scale ?? 1);
+    if (this._elAutoHeight) this._elAutoHeight.value = String(this._config.auto_card_height ?? true);
+    if (this._elCardHeight) this._elCardHeight.value = String(this._config.card_height ?? 0);
 
     this._elValuePos.value = this._config.value_position || "top_right";
-
-    this._swGlass.checked = !!this._config.glass;
-    this._swScale.checked = !!this._config.show_scale;
+    if (this._elValueOffX) this._elValueOffX.value = String(this._config.value_position_offset_x ?? 0);
+    if (this._elValueOffY) this._elValueOffY.value = String(this._config.value_position_offset_y ?? 0);
+        this._swScale.checked = !!this._config.show_scale;
+    this._swScaleMarkers.checked = !!this._config.scale_markers;
     this._swStats.checked = !!this._config.show_stats;
     this._swGraph.checked = !!this._config.show_graph;
 
@@ -1735,18 +2026,20 @@ class AndyTemperatureCardEditor extends HTMLElement {
       text.className = "itText";
       text.innerHTML = `
         <div class="itTitle">≤ ${it.to}</div>
-        <div class="itSub">Fill: ${it.gradient?.enabled ? `${it.gradient.from} → ${it.gradient.to}` : it.color} • Outline: ${it.outline} • Scale: ${it.scale_color || it.color}</div>
+        <div class="itSub">Fill: ${it.gradient?.enabled ? `${it.gradient.from} → ${it.gradient.to}` : it.color} • Outline: ${it.outline} • Scale: ${it.scale_color || it.color} • Neon: ${it.neon ?? 0}</div>
       `;
 
       const btns = document.createElement("div");
       btns.className = "btns";
 
       const bEdit = document.createElement("mwc-button");
+      bEdit.setAttribute("raised", "");
       bEdit.innerText = "Edit";
       bEdit.addEventListener("click", (e) => { e.stopPropagation(); this._startEdit(it.id); });
 
       const bDel = document.createElement("mwc-button");
       bDel.className = "danger";
+      bDel.setAttribute("unelevated", "");
       bDel.innerText = "Delete";
       bDel.addEventListener("click", (e) => { e.stopPropagation(); this._deleteInterval(it.id); });
 
@@ -1771,6 +2064,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
       color: "#22c55e",
       outline: "#ffffff",
       scale_color: "#22c55e",
+      neon: 0, inline: "#ffffff",
       gradient: { enabled: false, from: "#22c55e", to: "#22c55e" }
     });
     this._renderDraft(true);
@@ -1838,6 +2132,19 @@ class AndyTemperatureCardEditor extends HTMLElement {
     tfTo.addEventListener("input", (e) => { e.stopPropagation(); this._draft.to = Number(tfTo.value); });
     grid.appendChild(tfTo);
 
+    const tfNeon = document.createElement("ha-textfield");
+    tfNeon.type = "number";
+    tfNeon.step = "0.1";
+    tfNeon.min = "0";
+    tfNeon.label = "Neon glow";
+    tfNeon.value = String(this._draft.neon ?? 0);
+    tfNeon.addEventListener("input", (e) => {
+      e.stopPropagation();
+      const n = Number(tfNeon.value);
+      this._draft.neon = Number.isFinite(n) ? n : 0;
+    });
+    grid.appendChild(tfNeon);
+
     const ffGrad = document.createElement("ha-formfield");
     ffGrad.label = "Enable gradient";
     const swGrad = document.createElement("ha-switch");
@@ -1899,6 +2206,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
     box.appendChild(mkDraftColor("Fill color (HEX)", () => this._draft.color, (v) => { this._draft.color = v; }));
     box.appendChild(mkDraftColor("Outline color (HEX)", () => this._draft.outline, (v) => { this._draft.outline = v; }));
+    box.appendChild(mkDraftColor("Inner border (tube) color (HEX)", () => this._draft.inline, (v) => { this._draft.inline = v; }));
     box.appendChild(mkDraftColor("Scale color (HEX)", () => this._draft.scale_color, (v) => { this._draft.scale_color = v; }));
 
     if (this._draft.gradient?.enabled) {
@@ -1953,6 +2261,14 @@ class AndyTemperatureCardEditor extends HTMLElement {
       return this._commit(key, target.checked);
     }
 
+    // Select-based booleans
+    if (key === "auto_card_height") {
+      let v;
+      if (ev && ev.detail && "value" in ev.detail) v = ev.detail.value;
+      else v = target.value;
+      return this._commit(key, String(v) === "true");
+    }
+
     // Numeriska fält
     if (
       key === "min" ||
@@ -1960,6 +2276,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
       key === "value_font_size" ||
       key === "stats_hours" ||
       key === "card_scale" ||
+      key === "card_height" ||
       key === "graph_hours" ||
       key === "graph_height" ||
       key === "graph_max_points" ||
