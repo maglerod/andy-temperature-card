@@ -1259,7 +1259,10 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
       }
 
       .value.inside {
-        position:absolute; bottom: calc(25px + var(--asc-val-off-y, 0px)); left: calc(50% + var(--asc-val-off-x, 0px)); transform:translateX(-50%);
+        position:absolute;
+        bottom: calc(8px + var(--asc-val-off-y, 0px));
+        left: calc(50% + var(--asc-val-off-x, 0px));
+        transform: translate(-50%, 70%);
         background: transparent;
         border: none; 
         padding: 6px 10px; border-radius: 999px;
