@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v1.0.6.1
+ * v1.0.6.2
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -45,7 +45,7 @@
  *
  */
 
-const CARD_VERSION = "1.0.6.1";
+const CARD_VERSION = "1.0.6.2";
 console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 const CARD_TAG = "andy-temperature-card";
 const EDITOR_TAG = "andy-temperature-card-editor";
