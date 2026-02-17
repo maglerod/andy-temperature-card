@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v1.0.6
+ * v1.0.6.1
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -14,6 +14,9 @@
  * - Stats uses REST history endpoint via hass.callApi("GET", "history/period/...")
  *
  * Install: Se README.md in GITHUB
+ *
+ * Changelog 1.0.6.1 - 2026-02-17
+ * - Click on badge opens more information on specific entity and not main entity
  *
  * Changelog 1.0.6 - 2026-02-15
  * - Added NEON effect on interval level, to make the symbol "glow"
@@ -42,7 +45,7 @@
  *
  */
 
-const CARD_VERSION = "1.0.6";
+const CARD_VERSION = "1.0.6.1";
 console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 const CARD_TAG = "andy-temperature-card";
 const EDITOR_TAG = "andy-temperature-card-editor";
@@ -88,7 +91,7 @@ function normalizeInterval(it) {
 
   out.neon = Number(out.neon ?? 0);
   if (!Number.isFinite(out.neon)) out.neon = 0;
-  out.neon = Math.max(0, out.neon);
+  out.neon = Math.max(0, Math.min(2, out.neon));
   out.neon = Math.round(out.neon * 10) / 10;
   const g0 = out.gradient || {};
   out.gradient = { ...(g0 || {}) };
@@ -191,15 +194,11 @@ class AndyTemperatureCard extends LitElement {
       card_scale: 1,
       value_position: "top_right",
       value_font_size: 0,
-      value_position_offset_x: 0,
-      value_position_offset_y: 0,
       name_position: "auto",
       glass: true,
       orientation: "vertical",
       show_scale: false,
-              scale_markers: false,
-  scale_markers: false,
-scale_color_mode: "per_interval",
+      scale_color_mode: "per_interval",
       show_stats: false,
       stats_hours: 24,
       show_graph: false,
@@ -343,7 +342,7 @@ scale_color_mode: "per_interval",
         : (raw ?? "—");
 
       rows.push(html`
-        <div class="extraRow">
+        <div class="extraRow" @click=${(ev)=>this._openMoreInfoEntity(entity, ev)} style="cursor:pointer;">
           <ha-icon class="extraIcon" icon="${icon}"></ha-icon>
           <div class="extraText">
             ${label ? html`<div class="extraLabel">${label}</div>` : ""}
@@ -381,11 +380,27 @@ scale_color_mode: "per_interval",
     }));
   }
 
+  _openMoreInfoEntity(entityId, ev) {
+    if (ev) {
+      ev.stopPropagation();
+      ev.preventDefault?.();
+    }
+    const id = String(entityId || "").trim();
+    if (!id) return;
+
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      detail: { entityId: id },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+
   // *** v1.0.5.7 – robust + debug, men använder fortfarande REST history ***
   async _maybeUpdateStats() {
     if (!this.hass || !this._config) return;
 
-            const needStats = !!this._config.show_stats || (!!this._config.show_scale && !!this._config.scale_markers);
+        const needStats = !!this._config.show_stats; // scale drawing does not require stats
     const needGraph = !!this._config.show_graph;
     if (!needStats && !needGraph) return;
 
@@ -577,44 +592,6 @@ scale_color_mode: "per_interval",
     if (changedProps.has("hass") || changedProps.has("_config") || changedProps.has("_stats")) {
       this._drawScaleDom();
     }
-      this._syncCardHeight();
-  }
-
-
-  _syncCardHeight() {
-    try {
-      const cfg = this._config || {};
-      const card = this.shadowRoot?.querySelector("ha-card");
-      const wrap = this.shadowRoot?.querySelector(".wrap");
-      if (!card || !wrap) return;
-
-      const manual = Number(cfg.card_height ?? 0);
-      if (Number.isFinite(manual) && manual > 0) {
-        card.style.height = `${manual}px`;
-        card.style.minHeight = `${manual}px`;
-        return;
-      } else {
-        card.style.height = "";
-        card.style.minHeight = "";
-      }
-
-      const scale = Number(cfg.card_scale ?? 1);
-      const auto = (cfg.auto_card_height !== undefined) ? !!cfg.auto_card_height : (scale !== 1);
-
-      if (!auto) return;
-
-      // Reserve correct height even when inner content is scaled (zoom/transform can fool HA layout).
-      requestAnimationFrame(() => {
-        try {
-          const rect = wrap.getBoundingClientRect();
-          const h = Math.ceil(rect.height);
-          if (h > 0) {
-            // Use min-height so the card can still grow if content changes.
-            card.style.minHeight = `${h}px`;
-          }
-        } catch (_) {}
-      });
-    } catch (_) {}
   }
 
   _drawScaleDom() {
@@ -713,47 +690,6 @@ scale_color_mode: "per_interval",
           layer.appendChild(text);
         }
       }
-    
-      // Optional scale markers (clean, subtle arrows on the left)
-      const showMarkers = !!this._config?.scale_markers;
-      if (showMarkers) {
-        const arrowTipX = xMinor1 + 1; // point towards tick
-        const arrowBaseX = Math.max(0, arrowTipX - 7);
-        const arrowH = 6; // small + discreet
-
-        const colorForValue = (val) => {
-          const it = normalizeInterval(this._findIntervalForValue(val));
-          return normalizeHex(it?.color, "#ffffff");
-        };
-
-        const mkArrow = (val, color, y) => {
-          const p = document.createElementNS(NS, "path");
-          // small triangle pointing right
-          const d = `M ${arrowBaseX} ${y - arrowH/2} L ${arrowBaseX} ${y + arrowH/2} L ${arrowTipX} ${y} Z`;
-          p.setAttribute("d", d);
-          p.setAttribute("fill", color);
-          p.setAttribute("fill-opacity", "0.95");
-          return p;
-        };
-
-        // Current
-        if (currentValue != null && Number.isFinite(currentValue)) {
-          const yc = posY(currentValue);
-          layer.appendChild(mkArrow(currentValue, colorForValue(currentValue), yc));
-        }
-
-        // Min / Max from stats (if available)
-        const st = this._stats;
-        if (st && st.min != null && Number.isFinite(st.min)) {
-          const yMin = posY(st.min);
-          layer.appendChild(mkArrow(st.min, colorForValue(st.min), yMin));
-        }
-        if (st && st.max != null && Number.isFinite(st.max)) {
-          const yMax = posY(st.max);
-          layer.appendChild(mkArrow(st.max, colorForValue(st.max), yMax));
-        }
-      }
-
     } catch (e) {
       console.warn("Andy Temperature Card v1.0.5.8: scale DOM draw failed", e);
     }
@@ -808,15 +744,10 @@ scale_color_mode: "per_interval",
         const neon = (() => {
       const n = Number(interval.neon ?? 0);
       const v = Number.isFinite(n) ? n : 0;
-      return Math.max(0, Math.round(v * 10) / 10);
+      return Math.max(0, Math.min(2, Math.round(v * 10) / 10));
     })();
         const neonColor = normalizeHex(interval.outline, "#ffffff"); // neon follows outline
     const neonOutline = normalizeHex(interval.outline, "#ffffff");
-
-    const vOffX = Number(this._config.value_position_offset_x ?? 0);
-    const vOffY = Number(this._config.value_position_offset_y ?? 0);
-    const vOffXn = Number.isFinite(vOffX) ? vOffX : 0;
-    const vOffYn = Number.isFinite(vOffY) ? vOffY : 0;
 
     const showStats = !!this._config.show_stats;
     const stats = this._stats || { min: null, avg: null, max: null, samples: 0 };
@@ -824,7 +755,7 @@ scale_color_mode: "per_interval",
     const isHorizontal = (this._config.orientation === "horizontal");
 
     const cardScale = Number(this._config.card_scale ?? 1);
-    const scaleVarStyle = `--asc-scale:${cardScale};--asc-neon:${neon};--asc-neon-color:${neonColor};--asc-neon-outline:${neonColor};--asc-val-off-x:${vOffXn}px;--asc-val-off-y:${vOffYn}px;`;
+    const scaleVarStyle = `--asc-scale:${cardScale};--asc-neon:${neon};--asc-neon-color:${neonColor};--asc-neon-outline:${neonColor};`;
 
     return html`
       <ha-card @click=${this._openMoreInfo} style="cursor:pointer;">
@@ -1075,12 +1006,6 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
     const { value, interval } = opts;
 
     const it = normalizeInterval(interval);
-    const neon = (() => {
-      const n = Number(it.neon ?? 0);
-      const v = Number.isFinite(n) ? n : 0;
-      return Math.max(0, Math.round(v * 10) / 10);
-    })();
-    const neonOutline = normalizeHex(it.outline, "#ffffff");
     const useGradient = !!it.gradient?.enabled;
     const cSolid = normalizeHex(it.color, "#22c55e");
     const outline = normalizeHex(it.outline, "#ffffff");
@@ -1106,11 +1031,8 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
     const outerFill = "rgba(255,255,255,0.06)";
     const tubeBg = "rgba(255,255,255,0.03)";
 
-    const thermoPad = Math.min(28, (neon || 0) * 10);
-    const thermoVB = `${-thermoPad} ${-thermoPad} ${220 + thermoPad * 2} ${230 + thermoPad * 2}`;
-
     return html`
-      <svg class="thermo" style="overflow: visible;" viewBox="${thermoVB}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Temperature">
+      <svg class="thermo" viewBox="0 0 220 230" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Temperature">
         <defs>
           <linearGradient id="liquidGrad" x1="0" x2="0" y1="1" y2="0">
             <stop offset="0%" stop-color="${gFrom}"></stop>
@@ -1145,31 +1067,6 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
         </defs>
 
         <g transform="translate(-50,0)">
-          <path class="neonHalo3"
-            d="M160 10 C144 10 131 23 131 39 V135 C121 147 116 157 116 170 C116 200 140 220 160 220 C180 220 204 200 204 170 C204 157 199 147 189 135 V39 C189 23 176 10 160 10 Z"
-            fill="none"
-            stroke="${neonOutline}"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="${3.2 + (neon || 0) * 10}"
-            stroke-opacity="${(neon || 0) > 0 ? 0.06 : 0}"/>
-          <path class="neonHalo2"
-            d="M160 10 C144 10 131 23 131 39 V135 C121 147 116 157 116 170 C116 200 140 220 160 220 C180 220 204 200 204 170 C204 157 199 147 189 135 V39 C189 23 176 10 160 10 Z"
-            fill="none"
-            stroke="${neonOutline}"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="${3.2 + (neon || 0) * 6}"
-            stroke-opacity="${(neon || 0) > 0 ? 0.10 : 0}"/>
-          <path class="neonHalo1"
-            d="M160 10 C144 10 131 23 131 39 V135 C121 147 116 157 116 170 C116 200 140 220 160 220 C180 220 204 200 204 170 C204 157 199 147 189 135 V39 C189 23 176 10 160 10 Z"
-            fill="none"
-            stroke="${neonOutline}"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="${3.2 + (neon || 0) * 3}"
-            stroke-opacity="${(neon || 0) > 0 ? 0.18 : 0}"/>
-
           <path class="outer"
             d="M160 10 C144 10 131 23 131 39 V135 C121 147 116 157 116 170 C116 200 140 220 160 220 C180 220 204 200 204 170 C204 157 199 147 189 135 V39 C189 23 176 10 160 10 Z"
             fill="${outerFill}"
@@ -1210,9 +1107,8 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
   static get styles() {
     return css`
       :host { display:block; }
-      ha-card { overflow: hidden;
-        border-radius: 18px; }
-
+      ha-card { overflow: visible;
+        border-radius: 18px; overflow: hidden; }
       .wrap { overflow: visible; padding: 16px; }
 
       .wrap.orient-horizontal {
@@ -1236,7 +1132,7 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
       .header.top_center { justify-content:center; text-align:center; flex-direction:column; align-items:center; }
 
       .title { font-size: 14px; opacity: 0.9; letter-spacing: 0.2px; }
-      .value { font-weight: 850; letter-spacing: 0.2px; font-size: clamp(14px, 4vw, 22px); line-height: 1.1; position: relative; left: var(--asc-val-off-x, 0px); top: var(--asc-val-off-y, 0px); }
+      .value { font-weight: 850; letter-spacing: 0.2px; font-size: clamp(14px, 4vw, 22px); line-height: 1.1; }
       .unit { font-size: 12px; opacity: 0.75; margin-left: 4px; font-weight: 700; }
 
       .iconRow { display:flex; justify-content:center; padding-top: 6px; align-items:center; }
@@ -1308,12 +1204,10 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
       }
 
       .graphTicks {
-        margin-top: 0px;
-        padding-top: 0px;
-        font-size: 9px;
-        font-weight: 600;
-        line-height: 1;
-        opacity: 0.85;
+        margin-top: 2px;
+        font-size: 10px;
+        font-weight: 700;
+        opacity: 0.9;
       }
 
       .graphTicksLabels {
@@ -1386,10 +1280,6 @@ window.customCards.push({
 
 
 const DEFAULTS = {
-  // Layout sizing
-  auto_card_height: true, // auto-reserve correct height (helps when card_scale != 1)
-  card_height: 0, // px; 0 = auto
-
   name: "Temperature",
   entity: "",
   min: -20,
@@ -1402,7 +1292,6 @@ const DEFAULTS = {
   glass: true,
   orientation: "vertical",
   show_scale: false,
-  scale_markers: false,
   scale_color_mode: "per_interval",
   show_stats: false,
   stats_hours: 24,
@@ -1657,20 +1546,6 @@ class AndyTemperatureCardEditor extends HTMLElement {
     rowScale.appendChild(this._elCardScale);
     root.appendChild(rowScale);
 
-    const rowHeight = document.createElement("div");
-    rowHeight.className = "grid2";
-    this._elAutoHeight = mkSelect("Auto height", "auto_card_height", [
-      ["true", "On"],
-      ["false", "Off"],
-    ]);
-    this._elCardHeight = mkText("Card height (px) — 0 = auto", "card_height", "number", "0");
-    this._elCardHeight.min = "0";
-    this._elCardHeight.step = "1";
-    rowHeight.appendChild(this._elAutoHeight);
-    rowHeight.appendChild(this._elCardHeight);
-    root.appendChild(rowHeight);
-
-
     const rowVP = document.createElement("div");
     rowVP.className = "grid2";
 
@@ -1682,17 +1557,8 @@ class AndyTemperatureCardEditor extends HTMLElement {
       ["inside", "Inside icon"],
     ]);
     rowVP.appendChild(this._elValuePos);
-
-    const rowVPOff = document.createElement("div");
-    rowVPOff.className = "grid2";
-    this._elValueOffX = mkText("Offset X (px)", "value_position_offset_x", "number", "0");
-    this._elValueOffY = mkText("Offset Y (px)", "value_position_offset_y", "number", "0");
-    this._elValueOffX.step = "0.1";
-    this._elValueOffY.step = "0.1";
-    rowVPOff.appendChild(this._elValueOffX);
-    rowVPOff.appendChild(this._elValueOffY);
-    rowVP.appendChild(rowVPOff);
-
+    
+    
     this._elNamePos = mkSelect("Name position", "name_position", [
       ["auto", "Auto (follow value)"],
       ["left", "Left"],
@@ -1706,17 +1572,12 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const { wrap: swScaleWrap, sw: swScale } = mkSwitch("Show scale (ticks)", "show_scale");
     this._swScale = swScale;
 
-
-    const { wrap: swMarkersWrap, sw: swMarkers } = mkSwitch("Scale markers (Min/Max/Current)", "scale_markers");
-    this._swScaleMarkers = swMarkers;
-
     const { wrap: swStatsWrap, sw: swStats } = mkSwitch("Show Min/Avg/Max (history)", "show_stats");
     this._swStats = swStats;
 
     const { wrap: swGraphWrap, sw: swGraph } = mkSwitch("Show history graph", "show_graph");
     this._swGraph = swGraph;
     secTog.appendChild(swScaleWrap);
-    secTog.appendChild(swMarkersWrap);
     secTog.appendChild(swStatsWrap);
     secTog.appendChild(swGraphWrap);
 
@@ -1961,14 +1822,9 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._elMax.value = String(this._config.max ?? 40);
     this._elFont.value = String(this._config.value_font_size ?? 0);
     this._elCardScale.value = String(this._config.card_scale ?? 1);
-    if (this._elAutoHeight) this._elAutoHeight.value = String(this._config.auto_card_height ?? true);
-    if (this._elCardHeight) this._elCardHeight.value = String(this._config.card_height ?? 0);
 
     this._elValuePos.value = this._config.value_position || "top_right";
-    if (this._elValueOffX) this._elValueOffX.value = String(this._config.value_position_offset_x ?? 0);
-    if (this._elValueOffY) this._elValueOffY.value = String(this._config.value_position_offset_y ?? 0);
-        this._swScale.checked = !!this._config.show_scale;
-    this._swScaleMarkers.checked = !!this._config.scale_markers;
+    this._swScale.checked = !!this._config.show_scale;
     this._swStats.checked = !!this._config.show_stats;
     this._swGraph.checked = !!this._config.show_graph;
 
@@ -2139,7 +1995,8 @@ class AndyTemperatureCardEditor extends HTMLElement {
     tfNeon.type = "number";
     tfNeon.step = "0.1";
     tfNeon.min = "0";
-    tfNeon.label = "Neon glow";
+    tfNeon.max = "2";
+    tfNeon.label = "Neon glow (0–2)";
     tfNeon.value = String(this._draft.neon ?? 0);
     tfNeon.addEventListener("input", (e) => {
       e.stopPropagation();
@@ -2264,14 +2121,6 @@ class AndyTemperatureCardEditor extends HTMLElement {
       return this._commit(key, target.checked);
     }
 
-    // Select-based booleans
-    if (key === "auto_card_height") {
-      let v;
-      if (ev && ev.detail && "value" in ev.detail) v = ev.detail.value;
-      else v = target.value;
-      return this._commit(key, String(v) === "true");
-    }
-
     // Numeriska fält
     if (
       key === "min" ||
@@ -2279,7 +2128,6 @@ class AndyTemperatureCardEditor extends HTMLElement {
       key === "value_font_size" ||
       key === "stats_hours" ||
       key === "card_scale" ||
-      key === "card_height" ||
       key === "graph_hours" ||
       key === "graph_height" ||
       key === "graph_max_points" ||
