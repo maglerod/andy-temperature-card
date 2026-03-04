@@ -55,7 +55,7 @@ console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 
 // Easy renaming (keep these at the very top)
 const CARD_TAG = "andy-temperature-card";
-const EDITOR_TAG = "andy-temperature-card";
+const EDITOR_TAG = "andy-temperature-card-editor";
 
 const LitElement =
   window.LitElement || Object.getPrototypeOf(customElements.get("ha-panel-lovelace"));
