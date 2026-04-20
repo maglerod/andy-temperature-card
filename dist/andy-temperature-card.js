@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v1.0.7
+ * v1.0.8
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -14,6 +14,10 @@
  * - Stats uses REST history endpoint via hass.callApi("GET", "history/period/...")
  *
  * Install: Se README.md in GITHUB
+ *
+ * Changelog 1.0.8 - 2026-04-20
+ * - Added stats/graph period support (hours/today/yesterday/7d/30d) using real timestamps
+ * - Added Name font size
  *
  * Changelog 1.0.7 - 2026-03-04
  * - Value Offset position now visibile
@@ -49,7 +53,7 @@
  *
  */
 
-const CARD_VERSION = "1.0.7";
+const CARD_VERSION = "1.0.8";
 
 console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 
@@ -129,6 +133,36 @@ function toLocalHHMM(ts) {
   }
 }
 
+// v1.0.8 - resolve time span for stats/graph
+function resolvePeriodRange(period, hoursFallback) {
+  const p = String(period || "hours");
+  const now = new Date();
+
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const startOfYesterday = new Date(startOfToday.getTime() - 24 * 3600 * 1000);
+  const endOfYesterday = new Date(startOfToday.getTime() - 1);
+
+  if (p === "today") {
+    return { start: startOfToday, end: now };
+  }
+  if (p === "yesterday") {
+    return { start: startOfYesterday, end: endOfYesterday };
+  }
+  if (p === "7d") {
+    return { start: new Date(now.getTime() - 7 * 24 * 3600 * 1000), end: now };
+  }
+  if (p === "30d") {
+    return { start: new Date(now.getTime() - 30 * 24 * 3600 * 1000), end: now };
+  }
+
+  // default: hours
+  let h = Number(hoursFallback);
+  if (!Number.isFinite(h) || h <= 0) h = 24;
+  return { start: new Date(now.getTime() - h * 3600 * 1000), end: now };
+}
+
 // Downsample a series to at most maxPoints using bucket averaging.
 function downsampleSeries(series, maxPoints) {
   const s = series || [];
@@ -204,16 +238,18 @@ class AndyTemperatureCard extends LitElement {
       value_position_offset_x: 0,
       value_position_offset_y: 0,
       name_position: "auto",
+      name_font_size: 0, // v1.0.8
       glass: true,
       orientation: "vertical",
       show_scale: false,
-              scale_markers: false,
-  scale_markers: false,
-scale_color_mode: "per_interval",
+      scale_markers: false,
+      scale_color_mode: "per_interval",
       show_stats: false,
       stats_hours: 24,
+      stats_period: "hours", // v1.0.8: hours|today|yesterday|7d|30d
       show_graph: false,
       graph_hours: 24,
+      graph_period: "hours", // v1.0.8: hours|today|yesterday|7d|30d
       graph_height: 58,
       graph_show_time: true,
       graph_max_points: 160,
@@ -246,9 +282,9 @@ scale_color_mode: "per_interval",
 
     const ori = String(this._config.orientation || "vertical");
     this._config.orientation = (ori === "horizontal") ? "horizontal" : "vertical";
-    
+
     const np = String(this._config.name_position || "auto");
-    this._config.name_position = (np === "left" || np === "center") ? np : "auto";    
+    this._config.name_position = (np === "left" || np === "center") ? np : "auto";
 
     const scm = String(this._config.scale_color_mode || "per_interval");
     this._config.scale_color_mode = (scm === "active_interval") ? "active_interval" : "per_interval";
@@ -260,26 +296,35 @@ scale_color_mode: "per_interval",
     // graph clamps
     let gh = Number(this._config.graph_hours ?? this._config.stats_hours ?? 24);
     if (!Number.isFinite(gh) || gh <= 0) gh = 24;
-    this._config.graph_hours = Math.max(1, Math.min(168, gh));
+    this._config.graph_hours = Math.max(1, Math.min(720, gh)); // allow up to 30 days in hours for hours-mode
 
     let ghPx = Number(this._config.graph_height ?? 58);
     if (!Number.isFinite(ghPx) || ghPx <= 0) ghPx = 58;
-    this._config.graph_height = Math.max(40, Math.min(120, ghPx));
+    this._config.graph_height = Math.max(40, Math.min(160, ghPx));
 
     let mp = Number(this._config.graph_max_points ?? 160);
     if (!Number.isFinite(mp) || mp < 30) mp = 160;
-    this._config.graph_max_points = Math.max(30, Math.min(400, mp));
+    this._config.graph_max_points = Math.max(30, Math.min(600, mp));
 
     let lw = Number(this._config.graph_line_width ?? 0.7);
     if (!Number.isFinite(lw) || lw <= 0) lw = 0.7;
-    this._config.graph_line_width = Math.max(0.3, Math.min(2.0, lw));
-
-
+    this._config.graph_line_width = Math.max(0.3, Math.min(3.0, lw));
 
     if (!Array.isArray(this._config.intervals) || this._config.intervals.length === 0) {
       this._config.intervals = deepClone(DEFAULT_INTERVALS);
     }
     this._config.intervals = this._config.intervals.map(normalizeInterval);
+
+    // v1.0.8 normalize periods
+    const sp = String(this._config.stats_period || "hours");
+    this._config.stats_period = ["hours","today","yesterday","7d","30d"].includes(sp) ? sp : "hours";
+    const gp = String(this._config.graph_period || "hours");
+    this._config.graph_period = ["hours","today","yesterday","7d","30d"].includes(gp) ? gp : "hours";
+
+    // name size
+    let nfs = Number(this._config.name_font_size ?? 0);
+    if (!Number.isFinite(nfs) || nfs < 0) nfs = 0;
+    this._config.name_font_size = nfs;
 
     this._stats = null;
     this._lastStatsAt = 0;
@@ -341,11 +386,9 @@ scale_color_mode: "per_interval",
       const hasNum = Number.isFinite(num);
 
       const unit = this._getUnitForEntity(entity);
-//      const label = String(this._config?.[`extra_label_${n}`] || "").trim()
-//        || (st?.attributes?.friendly_name ?? entity);
       const rawLabel = String(this._config?.[`extra_label_${n}`] || "").trim();
-      const label = rawLabel !== "" ? rawLabel : "";  // visa aldrig default label
-        
+      const label = rawLabel !== "" ? rawLabel : "";
+
       const icon = String(this._config?.[`extra_icon_${n}`] || "").trim()
         || this._inferExtraIcon(entity);
 
@@ -406,12 +449,10 @@ scale_color_mode: "per_interval",
     }));
   }
 
-
-  // *** v1.0.5.7 – robust + debug, men använder fortfarande REST history ***
   async _maybeUpdateStats() {
     if (!this.hass || !this._config) return;
 
-            const needStats = !!this._config.show_stats || (!!this._config.show_scale && !!this._config.scale_markers);
+    const needStats = !!this._config.show_stats || (!!this._config.show_scale && !!this._config.scale_markers);
     const needGraph = !!this._config.show_graph;
     if (!needStats && !needGraph) return;
 
@@ -432,15 +473,23 @@ scale_color_mode: "per_interval",
     const entityId = this._config.entity;
     if (!entityId) return;
 
-    const rawHours = needGraph
-      ? (this._config.graph_hours ?? this._config.stats_hours ?? 24)
-      : (this._config.stats_hours ?? 24);
+    // v1.0.8 - period support for stats & graph
+    const statsPeriod = String(this._config.stats_period || "hours");
+    const graphPeriod = String(this._config.graph_period || "hours");
 
-    let hours = Number(rawHours);
-    if (!Number.isFinite(hours) || hours <= 0) hours = 24;
+    // We fetch ONE range that covers what we need.
+    // If both are enabled and periods differ, take the widest range to avoid double fetch.
+    const rStats = resolvePeriodRange(statsPeriod, this._config.stats_hours ?? 24);
+    const rGraph = resolvePeriodRange(graphPeriod, this._config.graph_hours ?? this._config.stats_hours ?? 24);
 
-    const end = new Date();
-    const start = new Date(end.getTime() - hours * 3600 * 1000);
+    let start = rStats.start;
+    let end = rStats.end;
+
+    if (needGraph) {
+      // widen to include graph range too
+      if (rGraph.start < start) start = rGraph.start;
+      if (rGraph.end > end) end = rGraph.end;
+    }
 
     const startIso = start.toISOString();
     const endIso = end.toISOString();
@@ -452,23 +501,8 @@ scale_color_mode: "per_interval",
 
     this._statsBusy = true;
 
-    //console.warn("Andy Temp v1.0.5.8 _maybeUpdateStats", {
-    //  needStats,
-    //  needGraph,
-    //  entityId,
-    //  path,
-    //});
-
     try {
       const data = await this.hass.callApi("GET", path);
-
-      //console.warn("Andy Temp v1.0.5.7 history raw data", {
-    //    type: Array.isArray(data) ? "array" : typeof data,
-    //    outerLength: Array.isArray(data) ? data.length : undefined,
-    //    keys: data && !Array.isArray(data) && typeof data === "object"
-    //      ? Object.keys(data)
-    //      : undefined,
-    //  });
 
       let seriesRaw;
 
@@ -485,34 +519,35 @@ scale_color_mode: "per_interval",
         seriesRaw = [];
       }
 
-      //console.warn("Andy Temp v1.0.5.8 seriesRaw length", seriesRaw?.length);
-
       const nums = [];
       const points = [];
+
+      const tsOf = (item) => {
+        const s = item?.last_changed || item?.last_updated || item?.lc || item?.lu;
+        const t = Date.parse(s);
+        return Number.isFinite(t) ? t : null;
+      };
+
+      const inRange = (t, range) => t != null && t >= range.start.getTime() && t <= range.end.getTime();
 
       for (const item of (seriesRaw || [])) {
         const rawState = item?.state ?? item?.s;
         const n = Number(rawState);
         if (!Number.isFinite(n)) continue;
-        nums.push(n);
-      }
 
-      //console.warn("Andy Temp v1.0.5.7 numeric samples", nums.length);
+        const t = tsOf(item);
+
+        // Collect for stats-period
+        if (needStats && inRange(t, rStats)) nums.push(n);
+
+        // Collect for graph-period
+        if (needGraph && inRange(t, rGraph)) points.push({ t, v: n });
+      }
 
       // Graph data
       if (needGraph) {
-        if (nums.length) {
-          const tStart = start.getTime();
-          const tEnd = end.getTime();
-          const span = (tEnd - tStart) || 1;
-          const N = nums.length;
-
-          for (let i = 0; i < N; i++) {
-            const v = nums[i];
-            const frac = N === 1 ? 0 : i / (N - 1);
-            const t = tStart + frac * span;
-            points.push({ t, v });
-          }
+        if (points.length) {
+          points.sort((a, b) => a.t - b.t);
 
           const maxPts = Number(this._config.graph_max_points ?? 160);
           const sampled = downsampleSeries(
@@ -520,12 +555,11 @@ scale_color_mode: "per_interval",
             Number.isFinite(maxPts) ? maxPts : 160
           );
           this._series = sampled;
-          //console.warn("Andy Temp v1.0.5.7 graph points", this._series.length);
         } else {
           const cur = this._getStateValue(this._config.entity);
           if (cur != null) {
-            const tStart = start.getTime();
-            const tEnd = end.getTime();
+            const tStart = rGraph.start.getTime();
+            const tEnd = rGraph.end.getTime();
             const mid = (tStart + tEnd) / 2;
 
             this._series = [
@@ -536,7 +570,6 @@ scale_color_mode: "per_interval",
           } else {
             this._series = [];
           }
-          //console.warn("Andy Temp v1.0.5.7 graph fallback series length", this._series.length);
         }
       } else {
         this._series = null;
@@ -567,7 +600,7 @@ scale_color_mode: "per_interval",
       this._lastStatsAt = now;
     } catch (err) {
       console.error(
-        "Andy Temperature Card v1.0.5.8: history fetch failed",
+        "Andy Temperature Card v1.0.8: history fetch failed",
         err,
         path
       );
@@ -701,7 +734,7 @@ scale_color_mode: "per_interval",
           layer.appendChild(text);
         }
       }
-    
+
       // Optional scale markers (clean, subtle arrows on the left)
       const showMarkers = !!this._config?.scale_markers;
       if (showMarkers) {
@@ -743,7 +776,7 @@ scale_color_mode: "per_interval",
       }
 
     } catch (e) {
-      console.warn("Andy Temperature Card v1.0.5.8: scale DOM draw failed", e);
+      console.warn("Andy Temperature Card v1.0.8: scale DOM draw failed", e);
     }
   }
 
@@ -765,11 +798,6 @@ scale_color_mode: "per_interval",
       `;
     }
 
-    //const decimals = Number(this._config.decimals ?? 1);
-    //const shown = fmtNum(value, decimals) ?? String(value);
-
-    //const vp = String(this._config.value_position || "top_right");
-    //const showHeaderValue = (vp === "top_right" || vp === "top_center" || vp === "top_left");
     const decimals = Number(this._config.decimals ?? 1);
     const shown = fmtNum(value, decimals) ?? String(value);
 
@@ -786,8 +814,6 @@ scale_color_mode: "per_interval",
     }
     const headerClassStr = headerClasses.join(" ");
 
-    
-    
     const showBottomValue = (vp === "bottom_right" || vp === "bottom_center" || vp === "bottom_left");
     const showInsideValue = (vp === "inside");
 
@@ -795,14 +821,17 @@ scale_color_mode: "per_interval",
       ? `font-size:${Number(this._config.value_font_size)}px;`
       : "";
 
+    const nameStyle = (this._config.name_font_size && Number(this._config.name_font_size) > 0)
+      ? `font-size:${Number(this._config.name_font_size)}px;`
+      : "";
+
     const interval = normalizeInterval(this._findIntervalForValue(value));
-        const neon = (() => {
+    const neon = (() => {
       const n = Number(interval.neon ?? 0);
       const v = Number.isFinite(n) ? n : 0;
       return Math.max(0, Math.round(v * 10) / 10);
     })();
-        const neonColor = normalizeHex(interval.outline, "#ffffff"); // neon follows outline
-    const neonOutline = normalizeHex(interval.outline, "#ffffff");
+    const neonColor = normalizeHex(interval.outline, "#ffffff"); // neon follows outline
 
     const vOffX = Number(this._config.value_position_offset_x ?? 0);
     const vOffY = Number(this._config.value_position_offset_y ?? 0);
@@ -824,15 +853,15 @@ scale_color_mode: "per_interval",
       <ha-card @click=${this._openMoreInfo} style="cursor:pointer;">
         <div class="wrap ${isHorizontal ? "orient-horizontal" : "orient-vertical"}" style="${scaleVarStyle}">
           <div class="rotator">
-                        <div class="${headerClassStr}">
+            <div class="${headerClassStr}">
               ${namePos === "center" && vp !== "top_center"
                 ? html`
-                    <div class="title" style="text-align:center; width:100%;">
+                    <div class="title" style="text-align:center; width:100%; ${nameStyle}">
                       ${name}
                     </div>
                   `
                 : html`
-                    <div class="title">${name}</div>
+                    <div class="title" style="${nameStyle}">${name}</div>
                   `}
               ${showHeaderValue ? html`
                 <div class="value" style="${valueStyle}">
@@ -840,7 +869,6 @@ scale_color_mode: "per_interval",
                 </div>
               ` : ""}
             </div>
-
 
             <div class="iconRow ${this._hasExtras() ? "hasExtras" : ""}">
               <div class="iconWrap">
@@ -886,185 +914,162 @@ scale_color_mode: "per_interval",
     `;
   }
 
+  _renderGraph() {
+    if (!this._config?.show_graph) return "";
 
-// v1.0.5.11 – auto-scale på data + tunnare linje + tids-ticks som verkligen syns
-// v1.0.5.12 – auto-scale + tunn linje + tids-ticks som HTML under grafen
-_renderGraph() {
-  if (!this._config?.show_graph) return "";
-
-  const base = Array.isArray(this._series) ? this._series : null;
-  if (!base || !base.length) {
-    return html`
-      <div class="graphWrap" style="height:${this._config.graph_height}px;">
-        <div class="graphEmpty">No history</div>
-      </div>
-    `;
-  }
-
-  try {
-    // Om bara 1 punkt -> gör en liten “platta”
-    let s = base;
-    if (s.length === 1) {
-      const p = base[0];
-      const t2 = p.t + 60 * 60 * 1000;
-      s = [
-        { t: p.t, v: p.v },
-        { t: t2, v: p.v },
-      ];
-    }
-
-    const heightPx = Number(this._config.graph_height ?? 58);
-    const height = Number.isFinite(heightPx) ? heightPx : 58;
-
-    const W = 260;
-    const H = 60;
-    const padL = 8;
-    const padR = 8;
-    const padT = 6;
-    const padB = 8; // lite bottenmarginal (grafen, inte ticks)
-
-    const innerW = W - padL - padR;
-    const innerH = H - padT - padB;
-
-    const t0 = s[0].t;
-    const t1 = s[s.length - 1].t;
-    const dt = (t1 - t0) || 1;
-
-    // Y-range ENBART baserat på graf-data (inte card min/max)
-    let yMin = s[0].v;
-    let yMax = s[0].v;
-    for (const p of s) {
-      if (p.v < yMin) yMin = p.v;
-      if (p.v > yMax) yMax = p.v;
-    }
-    if (Math.abs(yMax - yMin) < 0.001) {
-      yMin -= 1;
-      yMax += 1;
-    }
-
-    const xFor = (t) => padL + ((t - t0) / dt) * innerW;
-    const yFor = (v) => {
-      const t = clamp01((v - yMin) / (yMax - yMin));
-      return padT + (1 - t) * innerH;
-    };
-
-    const pts = s.map((p) => ({ x: xFor(p.t), y: yFor(p.v) }));
-const pathD = buildSmoothPath(pts);
-const baseY = padT + innerH;
-const firstX = pts[0].x;
-const lastX = pts[pts.length - 1].x;
-const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
-
-    const last = s[s.length - 1];
-    const it = normalizeInterval(this._findIntervalForValue(last.v));
-    const c = normalizeHex(it.scale_color || it.color, "#ffffff");
-
-    const lw = Number(this._config.graph_line_width ?? 1.0);
-    const strokeW = Number.isFinite(lw) ? lw : 1.0;
-
-    // Tids-ticks (endast för labels, linjen i grafen kör på t0..t1 ändå)
-    const showTimeTicks = this._config.graph_show_time !== false;
-    const ticks = [];
-    if (showTimeTicks && dt > 0) {
-      const count = 4; // ger 5 ticks (0..4)
-      for (let i = 0; i <= count; i++) {
-        const frac = i / count;
-        const tTick = t0 + frac * dt;
-        ticks.push({ t: tTick, label: toLocalHHMM(tTick) });
-      }
-    }
-
-//    console.warn("Andy Temp v1.0.5.12 ticks (HTML)", {
-//      showTimeTicks,
-//      tickCount: ticks.length,
-//      ticks,
-//    });
-
-    return html`
-      <div class="graphWrap" style="height:${height + (showTimeTicks && ticks.length ? 22 : 0)}px;">
-        <div class="graphInner">
-          <svg
-            class="graph"
-            viewBox="0 0 ${W} ${H}"
-            preserveAspectRatio="none"
-            role="img"
-            aria-label="History graph"
-          >
-            <defs>
-              <linearGradient id="gFill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="${c}" stop-opacity="0.25" />
-                <stop offset="100%" stop-color="${c}" stop-opacity="0" />
-              </linearGradient>
-            </defs>
-        <g class="symbol">
-
-            <rect
-              x="0"
-              y="0"
-              width="${W}"
-              height="${H}"
-              rx="10"
-              ry="10"
-              fill="none"
-              stroke="none"
-            />
-
-            <!-- Area (HA-like) -->
-            <path
-              d="${areaD}"
-              fill="url(#gFill)"
-              stroke="none"
-            />
-
-            <!-- Smooth line -->
-            <path
-              d="${pathD}"
-              fill="none"
-              stroke="${c}"
-              stroke-width="${strokeW}"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-
-            <!-- Small dot on last value -->
-            <circle
-              cx="${lastX}"
-              cy="${yFor(last.v)}"
-              r="2.6"
-              fill="${c}"
-              stroke="rgba(0,0,0,0.18)"
-              stroke-width="1"
-            />
-          </svg>
-
-          ${showTimeTicks && ticks.length
-            ? html`
-                <div class="graphTicks">
-                                    <div class="graphTicksLabels">
-                    ${ticks.map((ti) => html`<span>${ti.label}</span>`)}
-                  </div>
-                </div>
-              `
-            : ""}
+    const base = Array.isArray(this._series) ? this._series : null;
+    if (!base || !base.length) {
+      return html`
+        <div class="graphWrap" style="height:${this._config.graph_height}px;">
+          <div class="graphEmpty">No history</div>
         </div>
-      </div>
-    `;
-  } catch (e) {
-    console.error("Andy Temp v1.1.5 _renderGraph error", e);
-    return html`
-      <div class="graphWrap" style="height:${this._config.graph_height}px;">
-        <div class="graphEmpty">Graph error</div>
-      </div>
-    `;
+      `;
+    }
+
+    try {
+      let s = base;
+      if (s.length === 1) {
+        const p = base[0];
+        const t2 = p.t + 60 * 60 * 1000;
+        s = [
+          { t: p.t, v: p.v },
+          { t: t2, v: p.v },
+        ];
+      }
+
+      const heightPx = Number(this._config.graph_height ?? 58);
+      const height = Number.isFinite(heightPx) ? heightPx : 58;
+
+      const W = 260;
+      const H = 60;
+      const padL = 8;
+      const padR = 8;
+      const padT = 6;
+      const padB = 8;
+
+      const innerW = W - padL - padR;
+      const innerH = H - padT - padB;
+
+      const t0 = s[0].t;
+      const t1 = s[s.length - 1].t;
+      const dt = (t1 - t0) || 1;
+
+      let yMin = s[0].v;
+      let yMax = s[0].v;
+      for (const p of s) {
+        if (p.v < yMin) yMin = p.v;
+        if (p.v > yMax) yMax = p.v;
+      }
+      if (Math.abs(yMax - yMin) < 0.001) {
+        yMin -= 1;
+        yMax += 1;
+      }
+
+      const xFor = (t) => padL + ((t - t0) / dt) * innerW;
+      const yFor = (v) => {
+        const t = clamp01((v - yMin) / (yMax - yMin));
+        return padT + (1 - t) * innerH;
+      };
+
+      const pts = s.map((p) => ({ x: xFor(p.t), y: yFor(p.v) }));
+      const pathD = buildSmoothPath(pts);
+      const baseY = padT + innerH;
+      const firstX = pts[0].x;
+      const lastX = pts[pts.length - 1].x;
+      const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
+
+      const last = s[s.length - 1];
+      const it = normalizeInterval(this._findIntervalForValue(last.v));
+      const c = normalizeHex(it.scale_color || it.color, "#ffffff");
+
+      const lw = Number(this._config.graph_line_width ?? 1.0);
+      const strokeW = Number.isFinite(lw) ? lw : 1.0;
+
+      const showTimeTicks = this._config.graph_show_time !== false;
+      const ticks = [];
+      if (showTimeTicks && dt > 0) {
+        const count = 4;
+        for (let i = 0; i <= count; i++) {
+          const frac = i / count;
+          const tTick = t0 + frac * dt;
+          ticks.push({ t: tTick, label: toLocalHHMM(tTick) });
+        }
+      }
+
+      return html`
+        <div class="graphWrap" style="height:${height + (showTimeTicks && ticks.length ? 22 : 0)}px;">
+          <div class="graphInner">
+            <svg
+              class="graph"
+              viewBox="0 0 ${W} ${H}"
+              preserveAspectRatio="none"
+              role="img"
+              aria-label="History graph"
+            >
+              <defs>
+                <linearGradient id="gFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="${c}" stop-opacity="0.25" />
+                  <stop offset="100%" stop-color="${c}" stop-opacity="0" />
+                </linearGradient>
+              </defs>
+
+              <rect
+                x="0"
+                y="0"
+                width="${W}"
+                height="${H}"
+                rx="10"
+                ry="10"
+                fill="none"
+                stroke="none"
+              />
+
+              <path
+                d="${areaD}"
+                fill="url(#gFill)"
+                stroke="none"
+              />
+
+              <path
+                d="${pathD}"
+                fill="none"
+                stroke="${c}"
+                stroke-width="${strokeW}"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+
+              <circle
+                cx="${lastX}"
+                cy="${yFor(last.v)}"
+                r="2.6"
+                fill="${c}"
+                stroke="rgba(0,0,0,0.18)"
+                stroke-width="1"
+              />
+            </svg>
+
+            ${showTimeTicks && ticks.length
+              ? html`
+                  <div class="graphTicks">
+                    <div class="graphTicksLabels">
+                      ${ticks.map((ti) => html`<span>${ti.label}</span>`)}
+                    </div>
+                  </div>
+                `
+              : ""}
+          </div>
+        </div>
+      `;
+    } catch (e) {
+      console.error("Andy Temp v1.0.8 _renderGraph error", e);
+      return html`
+        <div class="graphWrap" style="height:${this._config.graph_height}px;">
+          <div class="graphEmpty">Graph error</div>
+        </div>
+      `;
+    }
   }
-}
-
-
-
-
-
-
-
   _thermoSvg(opts) {
     const { value, interval } = opts;
 
@@ -1110,24 +1115,6 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
             <stop offset="100%" stop-color="${gTo}"></stop>
           </linearGradient>
 
-          <linearGradient id="glassSheen" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stop-color="rgba(255,255,255,0.94)"></stop>
-            <stop offset="35%" stop-color="rgba(255,255,255,0.22)"></stop>
-            <stop offset="78%" stop-color="rgba(255,255,255,0.05)"></stop>
-            <stop offset="100%" stop-color="rgba(255,255,255,0.52)"></stop>
-          </linearGradient>
-
-          <linearGradient id="glassBand" x1="0" x2="1" y1="0" y2="1">
-            <stop offset="0%" stop-color="rgba(255,255,255,0.00)"></stop>
-            <stop offset="35%" stop-color="rgba(255,255,255,0.22)"></stop>
-            <stop offset="55%" stop-color="rgba(255,255,255,0.06)"></stop>
-            <stop offset="100%" stop-color="rgba(255,255,255,0.00)"></stop>
-          </linearGradient>
-
-          <filter id="specBlur" x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="1.8" />
-          </filter>
-
           <clipPath id="tubeClip">
             <path d="M160 18 C149 18 140 27 140 38 V138 C131 145 126 156 126 168 C126 191 145 208 160 208 C175 208 194 191 194 168 C194 156 189 145 180 138 V38 C180 27 171 18 160 18 Z" />
           </clipPath>
@@ -1171,7 +1158,6 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
             opacity="0.95"
             filter="url(#shadow)"/>
 
-
           <g clip-path="url(#tubeClip)">
             <rect x="120" y="0" width="100" height="220" fill="${tubeBg}"></rect>
 
@@ -1179,9 +1165,8 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
               x="120" y="${yTop}" width="100" height="${220 - yTop}"
               fill="${useGradient ? "url(#liquidGrad)" : cSolid}"
               opacity="0.98"></rect>
-
-            
           </g>
+
           <path class="tubeBorder"
             d="M160 18 C149 18 140 27 140 38 V138 C131 145 126 156 126 168 C126 191 145 208 160 208 C175 208 194 191 194 168 C194 156 189 145 180 138 V38 C180 27 171 18 160 18 Z"
             fill="none"
@@ -1190,9 +1175,6 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
             stroke-linejoin="round"
             stroke-linecap="round"
             opacity="1"/>
-
-        </g>
-
         </g>
 
         <g class="scale-layer" transform="translate(-50,0)" style="pointer-events:none;" shape-rendering="crispEdges"></g>
@@ -1203,8 +1185,7 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
   static get styles() {
     return css`
       :host { display:block; }
-      ha-card { overflow: hidden;
-        border-radius: 18px; }
+      ha-card { overflow: hidden; border-radius: 18px; }
 
       .wrap { overflow: visible; padding: 16px; }
 
@@ -1229,7 +1210,6 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
       .header.top_center { justify-content:center; text-align:center; flex-direction:column; align-items:center; }
       .header.top_left { justify-content: space-between; flex-direction: row-reverse; align-items: baseline; gap: 12px; }
 
-
       .title { font-size: 14px; opacity: 0.9; letter-spacing: 0.2px; }
       .value { font-weight: 850; letter-spacing: 0.2px; font-size: clamp(14px, 4vw, 22px); line-height: 1.1; position: relative; left: var(--asc-val-off-x, 0px); top: var(--asc-val-off-y, 0px); }
       .unit { font-size: 12px; opacity: 0.75; margin-left: 4px; font-weight: 700; }
@@ -1253,13 +1233,13 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
           drop-shadow(0 0 calc(var(--asc-neon, 0) * 6px) var(--asc-neon-color, rgba(255,255,255,0)));
       }
 
-            .value.inside {
+      .value.inside {
         position:absolute;
         bottom: calc(8px + var(--asc-val-off-y, 0px));
         left: calc(50% + var(--asc-val-off-x, 0px));
         transform: translate(-50%, 70%);
         background: transparent;
-        border: none; 
+        border: none;
         padding: 6px 10px; border-radius: 999px;
         backdrop-filter: none;
         font-size: clamp(12px, 3.5vw, 18px);
@@ -1272,7 +1252,6 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
       .bottom.bottom_center { justify-content:center; text-align:center; }
       .bottom.bottom_right { justify-content:flex-end; text-align:right; }
       .bottom.bottom_left { justify-content:flex-start; text-align:left; }
-
 
       .statsRow {
         margin-top: 12px;
@@ -1333,10 +1312,8 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
         flex-direction:column;
         gap: 2px;
         min-width: 90px;
-        /* flytta automatiskt närmare beroende på card_scale */
         margin-left: calc(-50px * var(--asc-scale, 1));
       }
-
 
       .extraRow {
         display:flex;
@@ -1349,9 +1326,7 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
         backdrop-filter: blur(6px);
       }
 
-      .extraIcon {
-        opacity: 0.90;
-      }
+      .extraIcon { opacity: 0.90; }
 
       .extraText { display:flex; flex-direction:column; line-height: 1.05; }
       .extraLabel { font-size: 11px; opacity: 0.75; font-weight: 800; }
@@ -1359,9 +1334,7 @@ const areaD = `${pathD} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
       .extraUnit  { font-size: 11px; opacity: 0.75; margin-left: 4px; font-weight: 800; }
 
       .sub { opacity:0.7; font-size:12px; padding:4px 0 0; }
-      .graph text {fill: rgba(255,255,255,0.95);
-}
-
+      .graph text { fill: rgba(255,255,255,0.95); }
     `;
   }
 }
@@ -1374,13 +1347,12 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: CARD_TAG,
   name: "Andy Temperature Card",
-  description: "Thermometer with locked scale + intervals (fill/gradient/outline) + per-interval scale coloring + glass + orientation + min/avg/max (REST history) + optional history graph.",
+  description: "Thermometer with locked scale + intervals (fill/gradient/outline) + per-interval scale coloring + optional stats + optional history graph + periods (today/yesterday/7d/30d).",
 });
 
 /* =============================================================================
  * Editor
  * ============================================================================= */
-
 
 const DEFAULTS = {
   name: "Temperature",
@@ -1390,7 +1362,10 @@ const DEFAULTS = {
   unit: "",
   decimals: 1,
   value_position: "top_right",
+  value_position_offset_x: 0,
+  value_position_offset_y: 0,
   name_position: "auto",
+  name_font_size: 0, // v1.0.8
   value_font_size: 0,
   glass: true,
   orientation: "vertical",
@@ -1399,13 +1374,17 @@ const DEFAULTS = {
   scale_color_mode: "per_interval",
   show_stats: false,
   stats_hours: 24,
+  stats_period: "hours", // v1.0.8
   card_scale: 1,
   show_graph: false,
   graph_hours: 24,
+  graph_period: "hours", // v1.0.8
   graph_height: 58,
   graph_show_time: true,
   graph_max_points: 160,
   graph_line_width: 0.7,
+
+  resize_card_on_neon: false,
 
   extra_entity_1: "",
   extra_icon_1: "",
@@ -1433,6 +1412,12 @@ class AndyTemperatureCardEditor extends HTMLElement {
       (String(incomingRaw.scale_color_mode) === "active_interval")
         ? "active_interval"
         : "per_interval";
+
+    // v1.0.8 normalize periods
+    const sp = String(incomingRaw.stats_period || "hours");
+    incomingRaw.stats_period = ["hours","today","yesterday","7d","30d"].includes(sp) ? sp : "hours";
+    const gp = String(incomingRaw.graph_period || "hours");
+    incomingRaw.graph_period = ["hours","today","yesterday","7d","30d"].includes(gp) ? gp : "hours";
 
     if (!Array.isArray(incomingRaw.intervals) || incomingRaw.intervals.length === 0) {
       incomingRaw.intervals = deepClone(DEFAULT_INTERVALS);
@@ -1467,42 +1452,20 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const stopBubbleColor = (e) => {
       if (e?.target?.matches?.('input[type="color"]')) return;
     };
-    
+
     const stopBubble = (e) => {
       e.stopPropagation();
     };
-    
 
     const wrap = document.createElement("div");
-
-    
-
     wrap.className = "editorWrap";
 
-
-    
-
     const topTitle = document.createElement("div");
-
-    
-
     topTitle.className = "editorTopTitle";
-
-    
-
     topTitle.textContent = `Andy Temperature Card v${CARD_VERSION}`;
-
-    
-
     wrap.appendChild(topTitle);
 
-
-    
-
     const root = document.createElement("div");
-
-    
-
     root.className = "form";
 
     const mkText = (label, key, type = "text", placeholder = "") => {
@@ -1545,38 +1508,6 @@ class AndyTemperatureCardEditor extends HTMLElement {
       sel.label = label;
       sel.configValue = key;
 
-    options.forEach(([value, text]) => {
-        const item = document.createElement("mwc-list-item");
-        item.value = value;
-        item.innerText = text;
-        sel.appendChild(item);
-    });
-
-  
-    sel.addEventListener("click", stopBubble);
-    sel.addEventListener("opened", stopBubble);
-    sel.addEventListener("closed", stopBubble);
-    sel.addEventListener("keydown", stopBubble);
-
-    sel.addEventListener("value-changed", (e) => {
-        stopBubble(e);
-        this._onChange(e);
-    });
-
-    sel.addEventListener("selected", (e) => {
-        stopBubble(e);
-        if (sel.value) this._commit(key, sel.value);
-    });
-
-    return sel;
-    };
-
-    
-    const mkSelectold = (label, key, options) => {
-      const sel = document.createElement("ha-select");
-      sel.label = label;
-      sel.configValue = key;
-
       options.forEach(([value, text]) => {
         const item = document.createElement("mwc-list-item");
         item.value = value;
@@ -1584,14 +1515,19 @@ class AndyTemperatureCardEditor extends HTMLElement {
         sel.appendChild(item);
       });
 
-      // Viktigt: låt events bubbla fritt, vi lyssnar bara och commit:ar
+      sel.addEventListener("click", stopBubble);
+      sel.addEventListener("opened", stopBubble);
+      sel.addEventListener("closed", stopBubble);
+      sel.addEventListener("keydown", stopBubble);
+
       sel.addEventListener("value-changed", (e) => {
+        stopBubble(e);
         this._onChange(e);
       });
 
       sel.addEventListener("selected", (e) => {
-        const v = sel.value;
-        if (v) this._commit(key, v);
+        stopBubble(e);
+        if (sel.value) this._commit(key, sel.value);
       });
 
       return sel;
@@ -1631,6 +1567,13 @@ class AndyTemperatureCardEditor extends HTMLElement {
     row2.appendChild(this._elDecimals);
     root.appendChild(row2);
 
+    // Name size (v1.0.8)
+    const rowNameSize = document.createElement("div");
+    rowNameSize.className = "grid2";
+    this._elNameFont = mkText("Name font size (px) — 0 = auto", "name_font_size", "number", "0");
+    rowNameSize.appendChild(this._elNameFont);
+    root.appendChild(rowNameSize);
+
     const row3 = document.createElement("div");
     row3.className = "grid3";
     this._elMin = mkText("Min (scale)", "min", "number");
@@ -1648,11 +1591,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._elCardScale.max = "4.0";
     this._elCardScale.step = "0.1";
     rowScale.appendChild(this._elCardScale);
-    
-root.appendChild(rowScale);
-
-    // Neon sizing behavior (helps avoid clipping; can be disabled if user prefers fixed card size)
-
+    root.appendChild(rowScale);
 
     const rowVP = document.createElement("div");
     rowVP.className = "grid2";
@@ -1691,7 +1630,6 @@ root.appendChild(rowScale);
     const { wrap: swScaleWrap, sw: swScale } = mkSwitch("Show scale (ticks)", "show_scale");
     this._swScale = swScale;
 
-
     const { wrap: swMarkersWrap, sw: swMarkers } = mkSwitch("Scale markers (Min/Max/Current)", "scale_markers");
     this._swScaleMarkers = swMarkers;
 
@@ -1700,10 +1638,12 @@ root.appendChild(rowScale);
 
     const { wrap: swGraphWrap, sw: swGraph } = mkSwitch("Show history graph", "show_graph");
     this._swGraph = swGraph;
+
     secTog.appendChild(swScaleWrap);
     secTog.appendChild(swMarkersWrap);
     secTog.appendChild(swStatsWrap);
     secTog.appendChild(swGraphWrap);
+
     const { wrap: swResizeWrap, sw: swResize } = mkSwitch("Resize card based on Neon", "resize_card_on_neon");
     this._swResizeNeon = swResize;
     secTog.appendChild(swResizeWrap);
@@ -1728,6 +1668,25 @@ root.appendChild(rowScale);
 
     root.appendChild(rowOpt);
 
+    // v1.0.8 periods
+    this._elStatsPeriod = mkSelect("Stats period", "stats_period", [
+      ["hours", "Last N hours"],
+      ["today", "Today"],
+      ["yesterday", "Yesterday"],
+      ["7d", "Last 7 days"],
+      ["30d", "Last 30 days"],
+    ]);
+    root.appendChild(this._elStatsPeriod);
+
+    this._elGraphPeriod = mkSelect("Graph period", "graph_period", [
+      ["hours", "Last N hours"],
+      ["today", "Today"],
+      ["yesterday", "Yesterday"],
+      ["7d", "Last 7 days"],
+      ["30d", "Last 30 days"],
+    ]);
+    root.appendChild(this._elGraphPeriod);
+
     this._elStatsHours = mkText("Stats lookback hours", "stats_hours", "number", "24");
     root.appendChild(this._elStatsHours);
 
@@ -1737,8 +1696,8 @@ root.appendChild(rowScale);
     const { wrap: swGraphTimeWrap, sw: swGraphTime } =
       mkSwitch("Graph: show time ticks", "graph_show_time");
     this._swGraphTime = swGraphTime;
-    root.appendChild(swGraphTimeWrap);
-
+    root.appendChild(swGraphTimeWrap);  
+    
     // Extra values
     const secExtra = document.createElement("div");
     secExtra.className = "section";
@@ -1879,7 +1838,7 @@ root.appendChild(rowScale);
         background: transparent;
         cursor: pointer;
       }
-    
+
       .editorWrap { display:flex; flex-direction:column; gap:14px; overflow: visible; }
       .editorTopTitle{
         display:block;
@@ -1945,6 +1904,8 @@ root.appendChild(rowScale);
     this._elUnit.value = this._config.unit || "";
     this._elDecimals.value = String(this._config.decimals ?? 1);
 
+    if (this._elNameFont) this._elNameFont.value = String(this._config.name_font_size ?? 0);
+
     this._elMin.value = String(this._config.min ?? -20);
     this._elMax.value = String(this._config.max ?? 40);
     this._elFont.value = String(this._config.value_font_size ?? 0);
@@ -1953,7 +1914,8 @@ root.appendChild(rowScale);
     this._elValuePos.value = this._config.value_position || "top_right";
     if (this._elValueOffX) this._elValueOffX.value = String(this._config.value_position_offset_x ?? 0);
     if (this._elValueOffY) this._elValueOffY.value = String(this._config.value_position_offset_y ?? 0);
-        this._swScale.checked = !!this._config.show_scale;
+
+    this._swScale.checked = !!this._config.show_scale;
     this._swScaleMarkers.checked = !!this._config.scale_markers;
     this._swStats.checked = !!this._config.show_stats;
     this._swGraph.checked = !!this._config.show_graph;
@@ -1963,10 +1925,13 @@ root.appendChild(rowScale);
     this._elScaleMode.value = this._config.scale_color_mode || "per_interval";
     this._elNamePos.value = this._config.name_position || "auto";
 
-    this._elStatsHours.style.display = this._config.show_stats ? "" : "none";
+    if (this._elStatsPeriod) this._elStatsPeriod.value = this._config.stats_period || "hours";
+    if (this._elGraphPeriod) this._elGraphPeriod.value = this._config.graph_period || "hours";
+
+    this._elStatsHours.style.display = (this._config.show_stats && (this._config.stats_period || "hours") === "hours") ? "" : "none";
     this._elStatsHours.value = String(this._config.stats_hours ?? 24);
 
-    this._elGraphHours.style.display = this._config.show_graph ? "" : "none";
+    this._elGraphHours.style.display = (this._config.show_graph && (this._config.graph_period || "hours") === "hours") ? "" : "none";
     this._elGraphHours.value = String(this._config.graph_hours ?? this._config.stats_hours ?? 24);
 
     this._swGraphTime.checked = !!this._config.graph_show_time;
@@ -2251,17 +2216,20 @@ root.appendChild(rowScale);
       return this._commit(key, target.checked);
     }
 
-    // Numeriska fält
+    // Numeric fields
     if (
       key === "min" ||
       key === "max" ||
       key === "value_font_size" ||
+      key === "name_font_size" ||
       key === "stats_hours" ||
       key === "card_scale" ||
       key === "graph_hours" ||
       key === "graph_height" ||
       key === "graph_max_points" ||
-      key === "graph_line_width"
+      key === "graph_line_width" ||
+      key === "value_position_offset_x" ||
+      key === "value_position_offset_y"
     ) {
       let v;
       if (ev && ev.detail && "value" in ev.detail) {
@@ -2285,7 +2253,7 @@ root.appendChild(rowScale);
       return this._commit(key, v);
     }
 
-    // Entity-fält (inkl extra_entity_1–3) – fixar X/rensning
+    // Entity fields (incl extra_entity_1–3)
     if (
       key === "entity" ||
       key === "extra_entity_1" ||
@@ -2294,7 +2262,7 @@ root.appendChild(rowScale);
     ) {
       let value;
       if (ev && ev.detail && "value" in ev.detail) {
-        value = ev.detail.value;  // kan vara string, objekt, null, ""
+        value = ev.detail.value;
       } else {
         value = target.value;
       }
@@ -2317,7 +2285,7 @@ root.appendChild(rowScale);
       if (typeof value === "string") value = value.trim();
       if (value === null || value === undefined) value = "";
 
-      // X tryckt → ta bort just det fältet ur config
+      // X pressed -> remove field from config
       if (!value) {
         const next = { ...(this._config || DEFAULTS) };
         delete next[key];
@@ -2336,7 +2304,7 @@ root.appendChild(rowScale);
       return this._commit(key, value);
     }
 
-    // Allt annat (text / select)
+    // Everything else (text / select)
     let genericValue;
     if (ev && ev.detail && "value" in ev.detail) {
       genericValue = ev.detail.value;
@@ -2350,4 +2318,4 @@ root.appendChild(rowScale);
 
 if (!customElements.get(EDITOR_TAG)) {
   customElements.define(EDITOR_TAG, AndyTemperatureCardEditor);
-}
+}    
