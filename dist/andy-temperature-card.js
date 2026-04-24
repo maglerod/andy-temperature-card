@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v1.0.8
+ * v1.0.9
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -14,6 +14,9 @@
  * - Stats uses REST history endpoint via hass.callApi("GET", "history/period/...")
  *
  * Install: Se README.md in GITHUB
+ *
+ * Changelog 1.0.9 - 2026-04-24
+ * - Added X,Y Offset on each extra entity / Badge
  *
  * Changelog 1.0.8 - 2026-04-20
  * - Added stats/graph period support (hours/today/yesterday/7d/30d) using real timestamps
@@ -53,7 +56,7 @@
  *
  */
 
-const CARD_VERSION = "1.0.8";
+const CARD_VERSION = "1.0.9";
 
 console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 
@@ -268,7 +271,15 @@ class AndyTemperatureCard extends LitElement {
       extra_entity_3: "",
       extra_icon_3: "",
       extra_label_3: "",
-
+      
+      // Extra badge offsets (v1.0.9)
+      extra_offset_x_1: 0,
+      extra_offset_y_1: 0,
+      extra_offset_x_2: 0,
+      extra_offset_y_2: 0,
+      extra_offset_x_3: 0,
+      extra_offset_y_3: 0,
+      
       intervals: deepClone(DEFAULT_INTERVALS),
     };
 
@@ -397,16 +408,26 @@ class AndyTemperatureCard extends LitElement {
         ? (fmtNum(num, Number.isFinite(decimals) ? decimals : 1) ?? String(num))
         : (raw ?? "—");
 
+      
+      const offX = Number(this._config?.[`extra_offset_x_${n}`] ?? 0);
+      const offY = Number(this._config?.[`extra_offset_y_${n}`] ?? 0);
+      const offXn = Number.isFinite(offX) ? offX : 0;
+      const offYn = Number.isFinite(offY) ? offY : 0;
+
       rows.push(html`
-        <div class="extraRow" @click=${(ev) => this._openMoreInfoForEntity(ev, entity)} style="cursor:pointer;">
+        <div
+          class="extraRow"
+          @click=${(ev) => this._openMoreInfoForEntity(ev, entity)}
+          style="cursor:pointer; transform: translate(${offXn}px, ${offYn}px);"
+      >
           <ha-icon class="extraIcon" icon="${icon}"></ha-icon>
           <div class="extraText">
-            ${label ? html`<div class="extraLabel">${label}</div>` : ""}
-            <div class="extraValue">
+          ${label ? html`<div class="extraLabel">${label}</div>` : ""}
+          <div class="extraValue">
               ${valueText}${unit ? html`<span class="extraUnit">${unit}</span>` : ""}
-            </div>
           </div>
-        </div>
+          </div>
+      </div>
       `);
     };
 
@@ -1397,6 +1418,14 @@ const DEFAULTS = {
   extra_entity_3: "",
   extra_icon_3: "",
   extra_label_3: "",
+  
+  // Extra badge offsets (v1.0.9)
+  extra_offset_x_1: 0,
+  extra_offset_y_1: 0,
+  extra_offset_x_2: 0,
+  extra_offset_y_2: 0,
+  extra_offset_x_3: 0,
+  extra_offset_y_3: 0,
 
   intervals: deepClone(DEFAULT_INTERVALS).map(normalizeInterval),
 };
@@ -1740,13 +1769,23 @@ class AndyTemperatureCardEditor extends HTMLElement {
     rowE11.appendChild(this._elExtraLabel1);
     rowE11.appendChild(this._elExtraIcon1);
     secExtra.appendChild(rowE11);
+    
+    const rowE1Off = document.createElement("div");
+    rowE1Off.className = "grid2";
+    this._elExtraOffX1 = mkText("Offset X (px)", "extra_offset_x_1", "number", "0");
+    this._elExtraOffY1 = mkText("Offset Y (px)", "extra_offset_y_1", "number", "0");
+    this._elExtraOffX1.step = "0.1";
+    this._elExtraOffY1.step = "0.1";
+    rowE1Off.appendChild(this._elExtraOffX1);
+    rowE1Off.appendChild(this._elExtraOffY1);
+    secExtra.appendChild(rowE1Off);
 
     const rowE2 = document.createElement("div");
     rowE2.className = "grid1";
     this._elExtraEntity2 = mkEntityPick("Extra entity 2", "extra_entity_2");
     rowE2.appendChild(this._elExtraEntity2);
     secExtra.appendChild(rowE2);
-
+    
     const rowE22 = document.createElement("div");
     rowE22.className = "grid2";
     this._elExtraLabel2 = mkText("Label (optional)", "extra_label_2");
@@ -1754,6 +1793,17 @@ class AndyTemperatureCardEditor extends HTMLElement {
     rowE22.appendChild(this._elExtraLabel2);
     rowE22.appendChild(this._elExtraIcon2);
     secExtra.appendChild(rowE22);
+
+    const rowE2Off = document.createElement("div");
+    rowE2Off.className = "grid2";
+    this._elExtraOffX2 = mkText("Offset X (px)", "extra_offset_x_2", "number", "0");
+    this._elExtraOffY2 = mkText("Offset Y (px)", "extra_offset_y_2", "number", "0");
+    this._elExtraOffX2.step = "0.1";
+    this._elExtraOffY2.step = "0.1";
+    rowE2Off.appendChild(this._elExtraOffX2);
+    rowE2Off.appendChild(this._elExtraOffY2);
+    secExtra.appendChild(rowE2Off);
+
 
     const rowE3 = document.createElement("div");
     rowE3.className = "grid1";
@@ -1768,6 +1818,16 @@ class AndyTemperatureCardEditor extends HTMLElement {
     rowE33.appendChild(this._elExtraLabel3);
     rowE33.appendChild(this._elExtraIcon3);
     secExtra.appendChild(rowE33);
+    
+    const rowE3Off = document.createElement("div");
+    rowE3Off.className = "grid2";
+    this._elExtraOffX3 = mkText("Offset X (px)", "extra_offset_x_3", "number", "0");
+    this._elExtraOffY3 = mkText("Offset Y (px)", "extra_offset_y_3", "number", "0");
+    this._elExtraOffX3.step = "0.1";
+    this._elExtraOffY3.step = "0.1";
+    rowE3Off.appendChild(this._elExtraOffX3);
+    rowE3Off.appendChild(this._elExtraOffY3);
+    secExtra.appendChild(rowE3Off);    
 
     root.appendChild(secExtra);
 
@@ -1951,6 +2011,18 @@ class AndyTemperatureCardEditor extends HTMLElement {
     if (this._elExtraEntity3) { this._elExtraEntity3.hass = this._hass; this._elExtraEntity3.value = this._config.extra_entity_3 || ""; }
     if (this._elExtraLabel3) this._elExtraLabel3.value = this._config.extra_label_3 || "";
     if (this._elExtraIcon3)  this._elExtraIcon3.value  = this._config.extra_icon_3  || "";
+    
+    if (this._elExtraOffX1) this._elExtraOffX1.value = String(this._config.extra_offset_x_1 ?? 0);
+    if (this._elExtraOffY1) this._elExtraOffY1.value = String(this._config.extra_offset_y_1 ?? 0);
+
+    if (this._elExtraOffX2) this._elExtraOffX2.value = String(this._config.extra_offset_x_2 ?? 0);
+    if (this._elExtraOffY2) this._elExtraOffY2.value = String(this._config.extra_offset_y_2 ?? 0);
+
+    if (this._elExtraOffX3) this._elExtraOffX3.value = String(this._config.extra_offset_x_3 ?? 0);
+    if (this._elExtraOffY3) this._elExtraOffY3.value = String(this._config.extra_offset_y_3 ?? 0);
+    
+    
+    
   }
 
   _renderIntervals() {
@@ -2218,6 +2290,12 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
     // Numeric fields
     if (
+      key === "extra_offset_x_1" ||
+      key === "extra_offset_y_1" ||
+      key === "extra_offset_x_2" ||
+      key === "extra_offset_y_2" ||
+      key === "extra_offset_x_3" ||
+      key === "extra_offset_y_3" ||
       key === "min" ||
       key === "max" ||
       key === "value_font_size" ||
