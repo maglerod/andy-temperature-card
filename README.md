@@ -1,4 +1,4 @@
-# Andy Temperature Card v1.0.8
+# Andy Temperature Card v1.0.9
 Andy Temperature Card is a sleek Lovelace custom card that visualizes a numeric sensor value as a modern thermometer.
 It supports configurable min/max scaling, optional tick marks, optional Min/Avg/Max statistics (via Home Assistant history), and powerful color styling through value intervals.
 
