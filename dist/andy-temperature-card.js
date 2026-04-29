@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v1.0.9
+ * v1.1.0
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -14,6 +14,12 @@
  * - Stats uses REST history endpoint via hass.callApi("GET", "history/period/...")
  *
  * Install: Se README.md in GITHUB
+ *
+ * Changelog 1.1.0 - 2026-04-24
+ *  UI: Replaced deprecated ha-select / mwc-list-item in visual editors with modern ha-selector-based select controls
+ *  UI: Updated editor boolean fields to use Home Assistant-compatible switch/formfield patterns where needed
+ *  FIX: Improved compatibility with newer Home Assistant versions in visual editors
+ *  FIX: Refactored editor select handling to avoid deprecated component usage and improve stability on reload/update
  *
  * Changelog 1.0.9 - 2026-04-24
  * - Added X,Y Offset on each extra entity / Badge
@@ -1463,6 +1469,11 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    try {
+      this.querySelectorAll("ha-selector").forEach((el) => {
+        el.hass = this._hass;
+      });
+    } catch (_) {}
     if (this._elEntity) this._elEntity.hass = this._hass;
   }
 
@@ -1532,32 +1543,44 @@ class AndyTemperatureCardEditor extends HTMLElement {
       return mkText(label, key, "text", "mdi:water-percent");
     };
 
+    const normalizeSelectOptions = (options) =>
+      (options || []).map((opt) => {
+        if (Array.isArray(opt)) return { value: String(opt[0] ?? ""), label: String(opt[1] ?? opt[0] ?? "") };
+        return { value: String(opt?.value ?? ""), label: String(opt?.label ?? opt?.value ?? "") };
+      });
+
     const mkSelect = (label, key, options) => {
-      const sel = document.createElement("ha-select");
+      const hasSelector = !!customElements.get("ha-selector");
+      const sel = hasSelector ? document.createElement("ha-selector") : document.createElement("select");
       sel.label = label;
       sel.configValue = key;
 
-      options.forEach(([value, text]) => {
-        const item = document.createElement("mwc-list-item");
-        item.value = value;
-        item.innerText = text;
-        sel.appendChild(item);
-      });
+      if (sel.tagName.toLowerCase() === "ha-selector") {
+        sel.hass = this._hass;
+        sel.selector = {
+          select: {
+            mode: "dropdown",
+            options: normalizeSelectOptions(options),
+          },
+        };
+      } else {
+        normalizeSelectOptions(options).forEach(({ value, label: optionLabel }) => {
+          const item = document.createElement("option");
+          item.value = value;
+          item.textContent = optionLabel;
+          sel.appendChild(item);
+        });
+      }
 
       sel.addEventListener("click", stopBubble);
-      sel.addEventListener("opened", stopBubble);
-      sel.addEventListener("closed", stopBubble);
       sel.addEventListener("keydown", stopBubble);
 
-      sel.addEventListener("value-changed", (e) => {
+      const handleChange = (e) => {
         stopBubble(e);
         this._onChange(e);
-      });
-
-      sel.addEventListener("selected", (e) => {
-        stopBubble(e);
-        if (sel.value) this._commit(key, sel.value);
-      });
+      };
+      sel.addEventListener("value-changed", handleChange);
+      sel.addEventListener("change", handleChange);
 
       return sel;
     };
@@ -1569,6 +1592,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
         sel.label = "Entity (numeric)";
         sel.configValue = "entity";
         sel.selector = { entity: {} };
+        sel.hass = this._hass;
         sel.addEventListener("value-changed", (e) => this._onChange(e));
         sel.addEventListener("click", stopBubbleColor);
         return sel;
@@ -1743,6 +1767,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
         sel.label = label;
         sel.configValue = key;
         sel.selector = { entity: {} };
+        sel.hass = this._hass;
         sel.addEventListener("value-changed", (e) => this._onChange(e));
         sel.addEventListener("click", stopBubbleColor);
         return sel;
