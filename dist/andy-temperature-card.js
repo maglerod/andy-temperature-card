@@ -15,7 +15,7 @@
  *
  * Install: Se README.md in GITHUB
  *
- * Changelog 1.1.0 - 2026-04-24
+ * Changelog 1.1.0 - 2026-04-28
  *  UI: Replaced deprecated ha-select / mwc-list-item in visual editors with modern ha-selector-based select controls
  *  UI: Updated editor boolean fields to use Home Assistant-compatible switch/formfield patterns where needed
  *  FIX: Improved compatibility with newer Home Assistant versions in visual editors
@@ -62,7 +62,7 @@
  *
  */
 
-const CARD_VERSION = "1.0.9";
+const CARD_VERSION = "1.1.0";
 
 console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 
