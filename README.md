@@ -4,7 +4,7 @@ It supports configurable min/max scaling, optional tick marks, optional Min/Avg/
 
 Now with multicolumn support and a new termometer design!
 
-![Preview image](images/image.png)
+![Preview image](images/boardcard.png)
 ![Preview 1_0_5](images/temperature_card_new_1.png)
 ![Preview 1_0_6_1](images/temp106.png)
 ![Preview 1_0_5_2](images/temperature_card_new_6.png)
