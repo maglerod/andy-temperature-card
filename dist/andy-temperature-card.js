@@ -3987,7 +3987,7 @@ function normalizeColumnsConfig(raw) {
       ? source.compact_columns !== false
       : source.shared_compact_columns !== undefined
         ? source.shared_compact_columns !== false
-        : graphMode === "shared",
+        : true,
     column_min_width: clampNumber(
       source.column_min_width ?? source.shared_column_min_width ?? 120,
       80,
