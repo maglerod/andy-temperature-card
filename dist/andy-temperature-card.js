@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v2.0
+ * v2.0.2
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -15,7 +15,7 @@
  *
  * Install: Se README.md in GITHUB
  *
- * Changelog 2.0 - 2026-05-01
+ * Changelog 2.0.2 - 2026-05-01
  * 
  * Added support for multiple temperature columns in one card.
  * Each column can now have its own full set of individual settings.
@@ -84,7 +84,7 @@
  *
  */
 
-const CARD_VERSION = "2.0";
+const CARD_VERSION = "2.0.2";
 
 console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 
