@@ -37,13 +37,12 @@
  * Added modern symbol styles: Classic, Clean, Glass, Frosted and Neon Modern
  * Added liquid effects: None, Gloss, Shimmer and Pulse
  *
- * 
  * Changelog 1.1.0 - 2026-04-28
  *  UI: Replaced deprecated ha-select / mwc-list-item in visual editors with modern ha-selector-based select controls
  *  UI: Updated editor boolean fields to use Home Assistant-compatible switch/formfield patterns where needed
  *  FIX: Improved compatibility with newer Home Assistant versions in visual editors
- *  FIX: Refactored editor select handling to avoid deprecated component usage and improve stability on reload/update
- * 
+ *  FIX: Refactored editor select handling to avoid deprecated component usage and improve stability on reload/update 
+ *
  * Changelog 1.0.9 - 2026-04-24
  * - Added X,Y Offset on each extra entity / Badge
  *
@@ -3990,10 +3989,10 @@ function normalizeColumnsConfig(raw) {
         ? source.shared_compact_columns !== false
         : graphMode === "shared",
     column_min_width: clampNumber(
-      source.column_min_width ?? source.shared_column_min_width ?? 140,
+      source.column_min_width ?? source.shared_column_min_width ?? 120,
       80,
       260,
-      140
+      120
     ),
     shared_compact_columns: source.shared_compact_columns !== false,
     shared_column_min_width: clampNumber(source.shared_column_min_width ?? 140, 80, 260, 140),
@@ -4609,10 +4608,10 @@ const COLUMNS_DEFAULTS = {
   shared_graph_show_time: true,
   shared_graph_max_points: 160,
   shared_graph_line_width: 1.0,
-  compact_columns: false,
-  column_min_width: 140,
+  compact_columns: true,
+  column_min_width: 120,
   shared_compact_columns: true,
-  shared_column_min_width: 140,
+  shared_column_min_width: 120,
   column_gap: 16,
   columns: [pickColumnDefaults(0)],
 };
@@ -4912,7 +4911,7 @@ class AndyTemperatureColumnsEditor extends HTMLElement {
     this._elColumnGap = mkText("Column gap (px)", "column_gap", "number", "16");
     const { wrap: swCompactWrap, sw: swCompact } = mkSwitch("Compact columns", "compact_columns");
     this._swCompactColumns = swCompact;
-    this._elColumnMinWidth = mkText("Column min width (px)", "column_min_width", "number", "140");
+    this._elColumnMinWidth = mkText("Column min width (px)", "column_min_width", "number", "120");
     rowColumnsLayout.appendChild(this._elColumnGap);
     rowColumnsLayout.appendChild(swCompactWrap);
     rowColumnsLayout.appendChild(this._elColumnMinWidth);
