@@ -90,8 +90,8 @@ const CARD_VERSION = "2.0";
 console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 
 // Easy renaming (keep these at the very top)
-const CARD_TAG = "andy-temperature-card-single-development";
-const EDITOR_TAG = "andy-temperature-card-editor-single-development";
+const CARD_TAG = "andy-temperature-card";
+const EDITOR_TAG = "andy-temperature-card-editor";
 const INTERNAL_SINGLE_CARD_TAG = `${CARD_TAG}-inner`;
 const INTERNAL_SINGLE_EDITOR_TAG = `${EDITOR_TAG}-inner`;
 
