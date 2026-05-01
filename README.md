@@ -2,6 +2,8 @@
 Andy Temperature Card is a sleek Lovelace custom card that visualizes a numeric sensor value as a modern thermometer.
 It supports configurable min/max scaling, optional tick marks, optional Min/Avg/Max statistics (via Home Assistant history), and powerful color styling through value intervals.
 
+Now with multicolumn support and a new termometer design!
+
 ![Preview image](images/image.png)
 ![Preview 1_0_5](images/temperature_card_new_1.png)
 ![Preview 1_0_6_1](images/temp106.png)
@@ -16,6 +18,13 @@ It supports configurable min/max scaling, optional tick marks, optional Min/Avg/
 
 
 Key features:
+- Multi-column support in a single temperature card
+- Individual configuration for each column
+- Individual or shared graph mode across all columns
+- Column duplication for faster setup
+- Board scale format selection: Fahrenheit and Celsius, Fahrenheit only, Celsius only
+- Additional liquid effects
+- Additional symbol styles
 - Thermometer visualization with a clean, modern look
 - Numeric entities (works with any entity whose state is a number)
 - Configurable value placement (top/bottom/inside)
