@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v2.0.2
+ * v2.0.3
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -14,6 +14,9 @@
  * - Stats uses REST history endpoint via hass.callApi("GET", "history/period/...")
  *
  * Install: Se README.md in GITHUB
+ *
+ * Changelog 2.0.3 - 2026-05-02
+ * - Added Show background toggle for the new Board termometer
  *
  * Changelog 2.0.2 - 2026-05-01
  * 
@@ -84,7 +87,7 @@
  *
  */
 
-const CARD_VERSION = "2.0.2";
+const CARD_VERSION = "2.0.3";
 
 console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 
@@ -346,6 +349,7 @@ class AndyTemperatureCard extends LitElement {
       symbol_variant: "classic",
       board_scale_format: "both",
       board_background_color: "#e4e4e4",
+      board_background_visible: true,
       board_background_gradient: true,
       symbol_style: "classic",
       liquid_effect: "none",
@@ -404,6 +408,7 @@ class AndyTemperatureCard extends LitElement {
     this._config.extra_background_2 = this._config.extra_background_2 !== false;
     this._config.extra_background_3 = this._config.extra_background_3 !== false;
     this._config.board_background_color = normalizeHex(this._config.board_background_color, "#e4e4e4");
+    this._config.board_background_visible = this._config.board_background_visible !== false;
     this._config.board_background_gradient = this._config.board_background_gradient !== false;
     this._config.symbol_style = normalizeChoice(this._config.symbol_style, SYMBOL_STYLES, "classic");
     this._config.liquid_effect = normalizeChoice(this._config.liquid_effect, LIQUID_EFFECTS, "none");
@@ -1636,6 +1641,7 @@ class AndyTemperatureCard extends LitElement {
     const gFrom = normalizeHex(it.gradient?.from, cSolid);
     const gTo = normalizeHex(it.gradient?.to, gFrom);
     const boardBg = normalizeHex(this._config?.board_background_color, "#e4e4e4");
+    const showBoardBackground = this._config?.board_background_visible !== false;
     const useBoardGradient = this._config?.board_background_gradient !== false;
     const boardBgLight = mixHex(boardBg, "#ffffff", 0.45);
     const boardBgMid = mixHex(boardBg, "#ffffff", 0.18);
@@ -1733,7 +1739,14 @@ class AndyTemperatureCard extends LitElement {
           </clipPath>
         </defs>
 
-          <rect x="22" y="6" width="176" height="600" rx="16" fill="${useBoardGradient ? `url(#${idBg})` : boardBg}"></rect>
+          <rect
+            x="22"
+            y="6"
+            width="176"
+            height="600"
+            rx="16"
+            fill="${showBoardBackground ? (useBoardGradient ? `url(#${idBg})` : boardBg) : "transparent"}"
+          ></rect>
 
         ${showScale ? svg`
             <text x="50" y="52" font-size="28" font-family="Arial" fill="${boardHeadingColor}">°F</text>
@@ -2589,6 +2602,7 @@ const DEFAULTS = {
   symbol_variant: "classic",
   board_scale_format: "both",
   board_background_color: "#e4e4e4",
+  board_background_visible: true,
   board_background_gradient: true,
   symbol_style: "classic",
   liquid_effect: "none",
@@ -2642,6 +2656,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
     incomingRaw.extra_background_2 = incomingRaw.extra_background_2 !== false;
     incomingRaw.extra_background_3 = incomingRaw.extra_background_3 !== false;
     incomingRaw.board_background_color = normalizeHex(incomingRaw.board_background_color, "#e4e4e4");
+    incomingRaw.board_background_visible = incomingRaw.board_background_visible !== false;
     incomingRaw.board_background_gradient = incomingRaw.board_background_gradient !== false;
     incomingRaw.symbol_style = normalizeChoice(incomingRaw.symbol_style, SYMBOL_STYLES, "classic");
     incomingRaw.liquid_effect = normalizeChoice(incomingRaw.liquid_effect, LIQUID_EFFECTS, "none");
@@ -2941,7 +2956,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
     root.appendChild(this._elSymbolVariant);
 
     this._rowBoardOptions = document.createElement("div");
-    this._rowBoardOptions.className = "grid2";
+    this._rowBoardOptions.className = "grid3";
 
     this._elBoardScaleFormat = mkSelect("Scale format", "board_scale_format", [
       ["both", "Fahrenheit and Celcius"],
@@ -2949,6 +2964,10 @@ class AndyTemperatureCardEditor extends HTMLElement {
       ["celsius", "Celsius"],
     ]);
     this._rowBoardOptions.appendChild(this._elBoardScaleFormat);
+
+    const { wrap: swBoardBgVisibleWrap, sw: swBoardBgVisible } = mkSwitch("Show board background", "board_background_visible");
+    this._swBoardBgVisible = swBoardBgVisible;
+    this._rowBoardOptions.appendChild(swBoardBgVisibleWrap);
 
     const { wrap: swBoardBgGradWrap, sw: swBoardBgGrad } = mkSwitch("Gradient board background", "board_background_gradient");
     this._swBoardBgGradient = swBoardBgGrad;
@@ -3349,6 +3368,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
     this._setSelectorValue(this._elNamePos, this._config.name_position || "auto");
     if (this._elSymbolVariant) this._setSelectorValue(this._elSymbolVariant, this._config.symbol_variant || "classic");
     if (this._elBoardScaleFormat) this._setSelectorValue(this._elBoardScaleFormat, this._config.board_scale_format || "both");
+    if (this._swBoardBgVisible) this._setFieldChecked(this._swBoardBgVisible, this._config.board_background_visible !== false);
     if (this._swBoardBgGradient) this._setFieldChecked(this._swBoardBgGradient, this._config.board_background_gradient !== false);
     if (this._elBoardBg) this._setFieldValue(this._elBoardBg, this._config.board_background_color || "#e4e4e4");
     if (this._elBoardBgPicker) this._elBoardBgPicker.value = normalizeHex(this._config.board_background_color, "#e4e4e4");
@@ -3941,6 +3961,7 @@ function normalizeColumnDraft(raw, index = 0) {
   next.extra_background_2 = next.extra_background_2 !== false;
   next.extra_background_3 = next.extra_background_3 !== false;
   next.board_background_color = normalizeHex(next.board_background_color, "#e4e4e4");
+  next.board_background_visible = next.board_background_visible !== false;
   next.board_background_gradient = next.board_background_gradient !== false;
   if (!Array.isArray(next.intervals) || !next.intervals.length) {
     next.intervals = deepClone(DEFAULT_INTERVALS);
