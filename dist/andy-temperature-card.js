@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v2.0.3
+ * v2.0.4
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -15,7 +15,7 @@
  *
  * Install: Se README.md in GITHUB
  *
- * Changelog 2.0.3 - 2026-05-04
+ * Changelog 2.0.4 - 2026-05-04
  * Now supports card_mod again. 
  * 
  * Changelog 2.0.2 - 2026-05-01
@@ -87,7 +87,7 @@
  *
  */
 
-const CARD_VERSION = "2.0.3";
+const CARD_VERSION = "2.0.4";
 
 console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 
