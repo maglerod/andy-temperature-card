@@ -15,9 +15,9 @@
  *
  * Install: Se README.md in GITHUB
  *
- * Changelog 2.0.3 - 2026-05-02
- * - Added Show background toggle for the new Board termometer
- *
+ * Changelog 2.0.3 - 2026-05-04
+ * Now supports card_mod again. 
+ * 
  * Changelog 2.0.2 - 2026-05-01
  * 
  * Added support for multiple temperature columns in one card.
@@ -163,6 +163,15 @@ function syncHaSelectorValue(el, value) {
   if (typeof el.requestUpdate === "function") {
     try { el.requestUpdate(); } catch (_) {}
   }
+}
+function getCardModStyleText(cardMod) {
+  const style = cardMod?.style;
+  return typeof style === "string" ? style : "";
+}
+function stripPureHaCardRules(cssText) {
+  const src = String(cssText || "");
+  if (!src.trim()) return "";
+  return src.replace(/(^|})\s*ha-card\s*\{[^}]*\}\s*/gi, "$1").trim();
 }
 function uid(prefix = "it") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
@@ -1390,8 +1399,10 @@ class AndyTemperatureCard extends LitElement {
     const neonPadX = resizeNeon ? Math.min(18, (neon || 0) * 8) : 0;
     const neonPadY = resizeNeon ? Math.min(12, (neon || 0) * 5) : 0;
     const scaleVarStyle = `--asc-scale:${cardScale};--asc-neon:${neon};--asc-neon-color:${neonColor};--asc-neon-outline:${neonColor};--asc-neon-pad-x:${neonPadX}px;--asc-neon-pad-y:${neonPadY}px;--asc-val-off-x:${vOffXn}px;--asc-val-off-y:${vOffYn}px;`;
+    const cardModStyle = getCardModStyleText(this._config?.card_mod);
 
     return html`
+      ${cardModStyle ? html`<style>${cardModStyle}</style>` : ""}
       <ha-card @click=${this._openMoreInfo} style="cursor:pointer;">
         <div class="wrap ${isHorizontal ? "orient-horizontal" : "orient-vertical"}" style="${scaleVarStyle}">
           <div class="rotator">
@@ -3992,6 +4003,7 @@ function normalizeColumnsConfig(raw) {
 
   return {
     type: String(source.type || CARD_TAG),
+    card_mod: cloneValue(source.card_mod),
     title: String(source.title ?? source.name ?? ""),
     graph_mode: graphMode,
     show_shared_graph: source.show_shared_graph !== false,
@@ -4342,6 +4354,17 @@ class AndyTemperatureColumnsCard extends LitElement {
       }
 
       const childConfig = cloneValue(col);
+      if (this._config?.card_mod) {
+        const childCardMod = cloneValue(this._config.card_mod);
+        const childStyle = stripPureHaCardRules(getCardModStyleText(childCardMod));
+        if ("style" in childCardMod) {
+          if (childStyle) childCardMod.style = childStyle;
+          else delete childCardMod.style;
+        }
+        if (Object.keys(childCardMod).length) {
+          childConfig.card_mod = childCardMod;
+        }
+      }
       if (sharedMode) {
         childConfig.show_graph = false;
         childConfig.show_stats = false;
@@ -4491,11 +4514,13 @@ class AndyTemperatureColumnsCard extends LitElement {
     const columnMin = compactColumns
       ? clampNumber(this._config?.column_min_width ?? 140, 80, 260, 140)
       : 190;
+    const cardModStyle = getCardModStyleText(this._config?.card_mod);
 
     return html`
+      ${cardModStyle ? html`<style>${cardModStyle}</style>` : ""}
       <ha-card>
         <div class="columnsWrap" style="--columns-gap:${gap}px; --columns-min:${columnMin}px;">
-          ${title ? html`<div class="columnsTitle">${title}</div>` : ""}
+          ${title ? html`<div class="columnsTitle title">${title}</div>` : ""}
           <div class="columnsGrid cols-${Math.min(columns.length, 4)}">
             ${columns.map((_, idx) => html`
               <div class="columnCell">
