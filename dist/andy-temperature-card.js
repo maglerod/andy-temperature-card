@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v2.0.4
+ * v2.0.5
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -14,6 +14,12 @@
  * - Stats uses REST history endpoint via hass.callApi("GET", "history/period/...")
  *
  * Install: Se README.md in GITHUB
+ *
+ * Changelog 2.0.5 - 2026-07-14
+ * - Updated visual-editor text, number and color fields for Home Assistant 2026.5+
+ *   (ha-input), while retaining compatibility with older HA releases (ha-textfield).
+ * - Prevented history-graph curves from drawing backwards when timestamps are
+ *   irregular, duplicated or returned out of order.
  *
  * Changelog 2.0.4 - 2026-05-04
  * Now supports card_mod again. 
@@ -87,9 +93,9 @@
  *
  */
 
-const CARD_VERSION = "2.0.4";
+const CARD_VERSION = "2.0.5";
 
-console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
+console.info(`Andy Temperature Card: v${CARD_VERSION}`);
 
 // Easy renaming (keep these at the very top)
 const CARD_TAG = "andy-temperature-card";
@@ -154,6 +160,20 @@ function mixHex(hexA, hexB, amount = 0.5) {
 function normalizeChoice(value, allowed, fallback) {
   const s = String(value || "").trim().toLowerCase();
   return allowed.includes(s) ? s : fallback;
+}
+function createEditorInput() {
+  const hasHaInput = !!customElements.get("ha-input");
+  const input = document.createElement(hasHaInput ? "ha-input" : "ha-textfield");
+
+  if (hasHaInput) {
+    Object.defineProperty(input, "helperText", {
+      configurable: true,
+      get() { return this.hint || ""; },
+      set(value) { this.hint = value == null ? "" : String(value); },
+    });
+  }
+
+  return input;
 }
 function syncHaSelectorValue(el, value) {
   if (!el) return;
@@ -264,7 +284,7 @@ function resolvePeriodRange(period, hoursFallback) {
 
 // Downsample a series to at most maxPoints using bucket averaging.
 function downsampleSeries(series, maxPoints) {
-  const s = series || [];
+  const s = normalizeTimeSeries(series);
   if (s.length <= maxPoints) return s;
 
   const buckets = maxPoints;
@@ -286,7 +306,26 @@ function downsampleSeries(series, maxPoints) {
     if (c) out.push({ t: sumT / c, v: sumV / c });
   }
   return out;
-}// Build a smooth SVG path (Catmull-Rom -> cubic Bezier) from [{x,y}, ...]
+}
+
+// Keep history points in chronological order and collapse duplicate timestamps.
+// History can briefly contain repeated or out-of-order entries after an entity
+// reconnects; one value per timestamp guarantees a forward-moving plot.
+function normalizeTimeSeries(series) {
+  const sorted = (series || [])
+    .filter((p) => p?.t != null && p.t !== "" && Number.isFinite(Number(p.t)) && Number.isFinite(Number(p?.v)))
+    .map((p) => ({ t: Number(p.t), v: Number(p.v) }))
+    .sort((a, b) => a.t - b.t);
+  const out = [];
+  for (const point of sorted) {
+    const last = out[out.length - 1];
+    if (last && point.t === last.t) last.v = point.v;
+    else out.push(point);
+  }
+  return out;
+}
+
+// Build a smooth SVG path that always moves forward along the time axis.
 function buildSmoothPath(pts) {
   const p = pts || [];
   if (p.length < 2) return "";
@@ -298,9 +337,10 @@ function buildSmoothPath(pts) {
     const p2 = p[i + 1];
     const p3 = p[i + 2] || p[i + 1];
 
-    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const dx = Math.max(0, p2.x - p1.x);
+    const c1x = p1.x + dx / 3;
     const c1y = p1.y + (p2.y - p0.y) / 6;
-    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2x = p2.x - dx / 3;
     const c2y = p2.y - (p3.y - p1.y) / 6;
 
     d.push(`C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`);
@@ -883,8 +923,6 @@ class AndyTemperatureCard extends LitElement {
       // Graph data
       if (needGraph) {
         if (points.length) {
-          points.sort((a, b) => a.t - b.t);
-
           const maxPts = Number(this._config.graph_max_points ?? 160);
           const sampled = downsampleSeries(
             points,
@@ -1472,7 +1510,7 @@ class AndyTemperatureCard extends LitElement {
   _renderGraph() {
     if (!this._config?.show_graph) return "";
 
-    const base = Array.isArray(this._series) ? this._series : null;
+    const base = Array.isArray(this._series) ? normalizeTimeSeries(this._series) : null;
     if (!base || !base.length) {
       return html`
         <div class="graphWrap" style="height:${this._config.graph_height}px;">
@@ -2736,7 +2774,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
     root.className = "form";
 
     const mkText = (label, key, type = "text", placeholder = "") => {
-      const tf = document.createElement("ha-textfield");
+      const tf = createEditorInput();
       tf.label = label;
       tf.type = type;
       tf.placeholder = placeholder;
@@ -2746,6 +2784,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
         tf._debounceTimer = setTimeout(() => this._onChange(e), 120);
       });
       tf.addEventListener("change", (e) => this._onChange(e));
+      tf.addEventListener("value-changed", (e) => this._onChange(e));
       return tf;
     };
 
@@ -3261,7 +3300,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
       .draftActions { display:flex; justify-content:flex-end; gap:10px; margin-top:10px; }
 
       .colorRow { display:flex; align-items:flex-end; gap:10px; margin-top:10px; }
-      .colorRow ha-textfield { flex: 1 1 auto; }
+      .colorRow ha-input, .colorRow ha-textfield { flex: 1 1 auto; }
       .colorBtn{
         width: 44px;
         height: 38px;
@@ -3591,20 +3630,26 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const grid = document.createElement("div");
     grid.className = "draftGrid2";
 
-    const tfTo = document.createElement("ha-textfield");
+    const tfTo = createEditorInput();
     tfTo.type = "number";
     tfTo.label = "Upper bound (to)";
     tfTo.value = String(this._draft.to ?? 0);
     tfTo.addEventListener("input", (e) => { e.stopPropagation(); this._draft.to = Number(tfTo.value); });
+    tfTo.addEventListener("value-changed", (e) => { e.stopPropagation(); this._draft.to = Number(tfTo.value); });
     grid.appendChild(tfTo);
 
-    const tfNeon = document.createElement("ha-textfield");
+    const tfNeon = createEditorInput();
     tfNeon.type = "number";
     tfNeon.step = "0.1";
     tfNeon.min = "0";
     tfNeon.label = "Neon glow";
     tfNeon.value = String(this._draft.neon ?? 0);
     tfNeon.addEventListener("input", (e) => {
+      e.stopPropagation();
+      const n = Number(tfNeon.value);
+      this._draft.neon = Number.isFinite(n) ? n : 0;
+    });
+    tfNeon.addEventListener("value-changed", (e) => {
       e.stopPropagation();
       const n = Number(tfNeon.value);
       this._draft.neon = Number.isFinite(n) ? n : 0;
@@ -3688,7 +3733,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
       const row = document.createElement("div");
       row.className = "colorRow";
 
-      const tf = document.createElement("ha-textfield");
+      const tf = createEditorInput();
       tf.label = label;
       tf.placeholder = "#RRGGBB";
 
@@ -3710,6 +3755,13 @@ class AndyTemperatureCardEditor extends HTMLElement {
       btn.value = cur;
 
       tf.addEventListener("change", (e) => {
+        e.stopPropagation();
+        const n = normalizeHex(tf.value, cur).toUpperCase();
+        tf.value = n;
+        btn.value = n;
+        setVal(n);
+      });
+      tf.addEventListener("value-changed", (e) => {
         e.stopPropagation();
         const n = normalizeHex(tf.value, cur).toUpperCase();
         tf.value = n;
@@ -4171,8 +4223,6 @@ class AndyTemperatureColumnsCard extends LitElement {
       if (graphRange && inRange(t, graphRange)) graphPoints.push({ t, v: n });
     }
 
-    graphPoints.sort((a, b) => a.t - b.t);
-
     let stats = null;
     if (statsValues.length) {
       let min = statsValues[0];
@@ -4186,7 +4236,7 @@ class AndyTemperatureColumnsCard extends LitElement {
       stats = { min, max, avg: sum / statsValues.length };
     }
 
-    return { stats, points: graphPoints };
+    return { stats, points: normalizeTimeSeries(graphPoints) };
   }
 
   _sampleSeriesLinear(points, t) {
@@ -4401,7 +4451,7 @@ class AndyTemperatureColumnsCard extends LitElement {
 
   _renderSharedGraph() {
     if (!this._sharedNeedsGraph()) return "";
-    const series = Array.isArray(this._sharedSeries) ? this._sharedSeries : null;
+    const series = Array.isArray(this._sharedSeries) ? normalizeTimeSeries(this._sharedSeries) : null;
     const heightPx = Number(this._config.shared_graph_height ?? 58);
     const height = Number.isFinite(heightPx) ? heightPx : 58;
     if (!series || !series.length) {
@@ -4689,7 +4739,7 @@ class AndyTemperatureColumnsEditor extends HTMLElement {
 
     const stopBubble = (e) => e.stopPropagation();
     const mkText = (label, key, type = "text", placeholder = "") => {
-      const tf = document.createElement("ha-textfield");
+      const tf = createEditorInput();
       tf.label = label;
       tf.type = type;
       tf.placeholder = placeholder;
@@ -4699,6 +4749,7 @@ class AndyTemperatureColumnsEditor extends HTMLElement {
         tf._debounceTimer = setTimeout(() => this._onChange(e), 120);
       });
       tf.addEventListener("change", (e) => this._onChange(e));
+      tf.addEventListener("value-changed", (e) => this._onChange(e));
       return tf;
     };
     const mkSwitch = (label, key) => {
