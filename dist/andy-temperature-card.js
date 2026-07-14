@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v2.0.5
+ * v2.0.6
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -14,6 +14,12 @@
  * - Stats uses REST history endpoint via hass.callApi("GET", "history/period/...")
  *
  * Install: Se README.md in GITHUB
+ *
+ * Changelog 2.0.6 - 2026-07-14
+ * - Replaced removed MWC editor buttons with Home Assistant ha-button controls.
+ * - Fixed immediate interval-list refresh after save or delete.
+ * - Fixed interval liquid-effect selector value handling.
+ * - Made white interval value/border colours automatically theme-aware.
  *
  * Changelog 2.0.5 - 2026-07-14
  * - Updated visual-editor text, number and color fields for Home Assistant 2026.5+
@@ -93,9 +99,9 @@
  *
  */
 
-const CARD_VERSION = "2.0.5";
+const CARD_VERSION = "2.0.6";
 
-console.info(`Andy Temperature Card: v${CARD_VERSION}`);
+console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 
 // Easy renaming (keep these at the very top)
 const CARD_TAG = "andy-temperature-card";
@@ -174,6 +180,36 @@ function createEditorInput() {
   }
 
   return input;
+}
+function createEditorButton(label, { appearance = "outlined", variant = "brand" } = {}) {
+  const hasHaButton = !!customElements.get("ha-button");
+  const button = document.createElement(hasHaButton ? "ha-button" : "mwc-button");
+  button.className = `actionButton${variant === "danger" ? " danger" : ""}`;
+  button.textContent = label;
+
+  if (hasHaButton) {
+    button.setAttribute("appearance", appearance);
+    button.setAttribute("variant", variant);
+  } else if (appearance === "filled") {
+    button.setAttribute("raised", "");
+  } else {
+    button.setAttribute("outlined", "");
+  }
+  return button;
+}
+
+// Very light interval colours are invisible on a light HA card. Let the theme
+// provide its primary text colour instead, which stays light in dark themes
+// and dark in light themes. Other user-selected colours remain unchanged.
+function themeAwareIntervalColor(color, fallback = "#ffffff") {
+  const normalized = normalizeHex(color, fallback);
+  const rgb = normalized.match(/^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i);
+  const brightness = rgb
+    ? (Number.parseInt(rgb[1], 16) * 299 + Number.parseInt(rgb[2], 16) * 587 + Number.parseInt(rgb[3], 16) * 114) / 1000
+    : 0;
+  return brightness >= 235
+    ? "var(--primary-text-color, #ffffff)"
+    : normalized;
 }
 function syncHaSelectorValue(el, value) {
   if (!el) return;
@@ -1404,7 +1440,7 @@ class AndyTemperatureCard extends LitElement {
     const showBottomValue = (vp === "bottom_right" || vp === "bottom_center" || vp === "bottom_left");
     const showInsideValue = (vp === "inside");
     const interval = normalizeInterval(this._findIntervalForValue(value));
-    const valueColor = normalizeHex(interval.value_color, "#ffffff");
+    const valueColor = themeAwareIntervalColor(interval.value_color);
 
     const valueStyleBase = (this._config.value_font_size && Number(this._config.value_font_size) > 0)
       ? `font-size:${Number(this._config.value_font_size)}px;`
@@ -1420,7 +1456,7 @@ class AndyTemperatureCard extends LitElement {
       const v = Number.isFinite(n) ? n : 0;
       return Math.max(0, Math.round(v * 10) / 10);
     })();
-    const neonColor = normalizeHex(interval.outline, "#ffffff"); // neon follows outline
+    const neonColor = themeAwareIntervalColor(interval.outline); // neon follows outline
 
     const vOffX = Number(this._config.value_position_offset_x ?? 0);
     const vOffY = Number(this._config.value_position_offset_y ?? 0);
@@ -1907,11 +1943,11 @@ class AndyTemperatureCard extends LitElement {
       const v = Number.isFinite(n) ? n : 0;
       return Math.max(0, Math.round(v * 10) / 10);
     })();
-    const neonOutline = normalizeHex(it.outline, "#ffffff");
+    const neonOutline = themeAwareIntervalColor(it.outline);
     const useGradient = !!it.gradient?.enabled;
     const cSolid = normalizeHex(it.color, "#22c55e");
-    const outline = normalizeHex(it.outline, "#ffffff");
-    const inline = normalizeHex(it.inline, outline);
+    const outline = themeAwareIntervalColor(it.outline);
+    const inline = themeAwareIntervalColor(it.inline, normalizeHex(it.outline, "#ffffff"));
     const gFrom = normalizeHex(it.gradient?.from, cSolid);
     const gTo = normalizeHex(it.gradient?.to, gFrom);
     const symbolStyle = normalizeChoice(this._config?.symbol_style, SYMBOL_STYLES, "classic");
@@ -3250,10 +3286,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
     const head = document.createElement("div");
     head.className = "section-head";
-    const btnAdd = document.createElement("mwc-button");
-    btnAdd.className = "actionButton";
-    btnAdd.setAttribute("raised", "");
-    btnAdd.innerText = "+ Add";
+    const btnAdd = createEditorButton("+ Add", { appearance: "filled" });
     btnAdd.addEventListener("click", (e) => { e.stopPropagation(); this._startAdd(); });
     head.appendChild(btnAdd);
     secInt.appendChild(head);
@@ -3271,8 +3304,8 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const style = document.createElement("style");
     style.textContent = `
       .form { display:flex; flex-direction:column; gap:12px; padding:8px 0; overflow: visible; }
-      mwc-button { --mdc-theme-primary: var(--primary-color); --mdc-theme-on-primary: #fff; }
-      mwc-button.danger { --mdc-theme-primary: var(--error-color); --mdc-theme-on-primary: #fff; }
+      ha-button, mwc-button { --mdc-theme-primary: var(--primary-color); --mdc-theme-on-primary: #fff; }
+      ha-button.danger, mwc-button.danger { --mdc-theme-primary: var(--error-color); --mdc-theme-on-primary: #fff; }
       .grid1 { display:grid; grid-template-columns: 1fr; gap:12px; }
       .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
       .grid3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; }
@@ -3533,16 +3566,10 @@ class AndyTemperatureCardEditor extends HTMLElement {
       const btns = document.createElement("div");
       btns.className = "btns";
 
-      const bEdit = document.createElement("mwc-button");
-      bEdit.className = "actionButton";
-      bEdit.setAttribute("raised", "");
-      bEdit.innerText = "Edit";
+      const bEdit = createEditorButton("Edit", { appearance: "outlined" });
       bEdit.addEventListener("click", (e) => { e.stopPropagation(); this._startEdit(it.id); });
 
-      const bDel = document.createElement("mwc-button");
-      bDel.className = "danger actionButton";
-      bDel.setAttribute("unelevated", "");
-      bDel.innerText = "Delete";
+      const bDel = createEditorButton("Delete", { appearance: "filled", variant: "danger" });
       bDel.addEventListener("click", (e) => { e.stopPropagation(); this._deleteInterval(it.id); });
 
       btns.appendChild(bEdit);
@@ -3620,9 +3647,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const head = document.createElement("div");
     head.className = "draftHead";
     head.innerHTML = `<div>${this._editingId == null ? "Add interval" : "Edit interval"}</div>`;
-    const btnClose = document.createElement("mwc-button");
-    btnClose.className = "actionButton";
-    btnClose.innerText = "Close";
+    const btnClose = createEditorButton("Close", { appearance: "outlined" });
     btnClose.addEventListener("click", (e) => { e.stopPropagation(); this._closeDraft(); });
     head.appendChild(btnClose);
     box.appendChild(head);
@@ -3700,8 +3725,14 @@ class AndyTemperatureCardEditor extends HTMLElement {
 
       const handle = (e) => {
         e.stopPropagation();
-        const nextValue = (e?.detail && "value" in e.detail) ? e.detail.value : sel.value;
-        onValue(String(nextValue ?? ""));
+        let nextValue = (e?.detail && "value" in e.detail) ? e.detail.value : sel.value;
+        if (nextValue && typeof nextValue === "object") {
+          if ("value" in nextValue) nextValue = nextValue.value;
+          else if (nextValue.item && typeof nextValue.item === "object" && "value" in nextValue.item) nextValue = nextValue.item.value;
+        }
+        const resolvedValue = String(nextValue ?? "");
+        syncHaSelectorValue(sel, resolvedValue);
+        onValue(resolvedValue);
       };
       if (isHaSelector) {
         sel.addEventListener("value-changed", handle);
@@ -3802,16 +3833,10 @@ class AndyTemperatureCardEditor extends HTMLElement {
     const actions = document.createElement("div");
     actions.className = "draftActions";
 
-    const btnCancel = document.createElement("mwc-button");
-    btnCancel.className = "actionButton";
-    btnCancel.setAttribute("outlined", "");
-    btnCancel.innerText = "Cancel";
+    const btnCancel = createEditorButton("Cancel", { appearance: "outlined", variant: "neutral" });
     btnCancel.addEventListener("click", (e) => { e.stopPropagation(); this._closeDraft(); });
 
-    const btnSave = document.createElement("mwc-button");
-    btnSave.className = "actionButton";
-    btnSave.setAttribute("raised", "");
-    btnSave.innerText = "Save";
+    const btnSave = createEditorButton("Save", { appearance: "filled" });
     btnSave.addEventListener("click", (e) => { e.stopPropagation(); this._saveDraft(); });
 
     actions.appendChild(btnCancel);
@@ -3822,6 +3847,7 @@ class AndyTemperatureCardEditor extends HTMLElement {
   _commit(key, value) {
     const next = { ...(this._config || DEFAULTS), [key]: value };
     this._config = next;
+    if (key === "intervals") this._renderIntervals();
 
     this.dispatchEvent(new CustomEvent("config-changed", {
       detail: { config: next },
@@ -4871,8 +4897,8 @@ class AndyTemperatureColumnsEditor extends HTMLElement {
       .columnEditor .badgeSupport,
       .columnEditor .editorTopTitle { display:none !important; }
       .columnEditor .editorWrap { gap:10px; }
-      mwc-button { --mdc-theme-primary: var(--primary-color); --mdc-theme-on-primary: #fff; }
-      mwc-button.danger { --mdc-theme-primary: var(--error-color); --mdc-theme-on-primary: #fff; }
+      ha-button, mwc-button { --mdc-theme-primary: var(--primary-color); --mdc-theme-on-primary: #fff; }
+      ha-button.danger, mwc-button.danger { --mdc-theme-primary: var(--error-color); --mdc-theme-on-primary: #fff; }
     `;
 
     const root = document.createElement("div");
@@ -4984,10 +5010,7 @@ class AndyTemperatureColumnsEditor extends HTMLElement {
     const columnsTitle = document.createElement("div");
     columnsTitle.className = "section-title columnsSectionTitle";
     columnsTitle.textContent = "Columns";
-    const addBtn = document.createElement("mwc-button");
-    addBtn.className = "actionButton";
-    addBtn.setAttribute("raised", "");
-    addBtn.textContent = "+ Add column";
+    const addBtn = createEditorButton("+ Add column", { appearance: "filled" });
     addBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       const next = this._getColumns();
@@ -5098,10 +5121,7 @@ class AndyTemperatureColumnsEditor extends HTMLElement {
         const actions = document.createElement("div");
         actions.className = "columnActions";
 
-        const duplicateBtn = document.createElement("mwc-button");
-        duplicateBtn.className = "actionButton";
-        duplicateBtn.setAttribute("outlined", "");
-        duplicateBtn.textContent = "Duplicate";
+        const duplicateBtn = createEditorButton("Duplicate", { appearance: "outlined" });
         duplicateBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           const currentIndex = Number(entry?.index ?? idx);
@@ -5112,10 +5132,7 @@ class AndyTemperatureColumnsEditor extends HTMLElement {
         });
         actions.appendChild(duplicateBtn);
 
-        const del = document.createElement("mwc-button");
-        del.className = "danger actionButton";
-        del.setAttribute("unelevated", "");
-        del.textContent = "Remove";
+        const del = createEditorButton("Remove", { appearance: "filled", variant: "danger" });
         del.addEventListener("click", (e) => {
           e.stopPropagation();
           const currentIndex = Number(entry?.index ?? idx);
