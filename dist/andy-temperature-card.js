@@ -1,6 +1,6 @@
 /**
  * Andy Temperature Card
- * v2.0.6
+ * v2.0.7
  * ------------------------------------------------------------------
  * Developed by: Andreas ("AndyBonde") with some help from AI :).
  *
@@ -14,6 +14,9 @@
  * - Stats uses REST history endpoint via hass.callApi("GET", "history/period/...")
  *
  * Install: Se README.md in GITHUB
+ *
+ * Changelog 2.0.7 - 2026-08-12
+ * - Fixed shared statistics labels displaying the confusing duplicate “avg” text.
  *
  * Changelog 2.0.6 - 2026-07-14
  * - Replaced removed MWC editor buttons with Home Assistant ha-button controls.
@@ -99,7 +102,7 @@
  *
  */
 
-const CARD_VERSION = "2.0.6";
+const CARD_VERSION = "2.0.7";
 
 console.info(`Andy Temperature Card loaded: v${CARD_VERSION}`);
 
@@ -4468,9 +4471,9 @@ class AndyTemperatureColumnsCard extends LitElement {
     const x = fmtNum(stats.max, decimals) ?? "—";
     return html`
       <div class="sharedStatsRow">
-        <span>Min avg: ${m}${unit}</span>
-        <span>Avg avg: ${a}${unit}</span>
-        <span>Max avg: ${x}${unit}</span>
+        <span>Min: ${m}${unit}</span>
+        <span>Avg: ${a}${unit}</span>
+        <span>Max: ${x}${unit}</span>
       </div>
     `;
   }

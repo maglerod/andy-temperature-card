@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.7
+- Fixed shared Min/Avg/Max labels incorrectly displaying “avg” twice.
+
 ## v1.0.5
 - Fixed visual config editor issues
 - Fixed the Value inside icon position
